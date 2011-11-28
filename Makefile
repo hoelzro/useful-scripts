@@ -1,5 +1,5 @@
 DESTINATION=$(HOME)/bin
-FILES=$(shell ls | grep -v Makefile)
+FILES=$(shell ls | grep -v Makefile | grep -v README)
 
 install:
 	mkdir -p $(DESTINATION)
