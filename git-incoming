@@ -1,0 +1,27 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+my ($current_branch) = grep { /^\*/ } qx(git branch --no-color);
+$current_branch =~ s/^\*\s*//;
+chomp $current_branch;
+
+my ( $remote ) = @ARGV;
+
+unless(defined $remote) {
+    $remote = qx(git config branch.$current_branch.remote);
+    chomp $remote;
+    die "$current_branch does not seem to be a tracking branch (branch.$current_branch.remote not found)\n" unless $remote;
+
+    my $merge = qx(git config branch.$current_branch.merge);
+    $merge =~ s/.*\///;
+    chomp $merge;
+    die "$current_branch does not seem to be a tracking branch (branch.$current_branch.merge not found)\n" unless $merge;
+
+    system "git fetch $remote >/dev/null";
+    exit($? >> 8) if $@;
+    $remote .= "/$merge";
+}
+
+exec 'git', 'log', "HEAD..$remote";
