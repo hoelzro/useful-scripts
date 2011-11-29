@@ -1,3 +1,5 @@
 #!/bin/sh
 
-exec $EDITOR $(pmpath $1)
+module=$1
+shift
+exec $EDITOR $(pmpath $module) "$@"
