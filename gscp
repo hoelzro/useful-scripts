@@ -5,6 +5,8 @@
 use strict;
 use warnings;
 
+use File::Spec;
+
 sub help {
     print <<"END_HELP";
 usage: $0 [files...] remote:
@@ -52,7 +54,15 @@ my $destination = pop @ARGV;
 if($destination =~ /:$/) {
     $destination =~ s/:$//;
     $destination = resolve_remote($destination);
-    exec 'scp', @ARGV, $destination;
 } else {
-    die "not yet implemented";
+    foreach my $arg (@ARGV) {
+        if($arg =~ /(.*):(.*)/) {
+            my ( $remote, $filename ) = ( $1, $2 );
+
+            my $destination = resolve_remote($remote);
+            $arg            = File::Spec->catfile($destination, $filename);
+        }
+    }
 }
+
+exec 'scp', @ARGV, $destination;
