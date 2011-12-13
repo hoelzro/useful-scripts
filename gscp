@@ -1,0 +1,52 @@
+#!/usr/bin/perl
+
+# gscp - shortcut for scp'ing files between localhost and a SSH git remote
+
+use strict;
+use warnings;
+
+sub help {
+    print <<"END_HELP";
+usage: $0 [files...] remote:
+       $0 remote:filename [destination]
+
+Simply a shortcut for scp.  For example, if you have the following remote
+in your Git repository:
+
+  origin ssh://my.server/projects/example/
+
+'gscp EXAMPLE.pod origin:' would be equivalent to
+'scp EXAMPLE.pod my.server:projects/example/'
+
+Useful for transferring patches and helper scripts you intend to use on a
+different machine.
+END_HELP
+
+    exit 0;
+}
+
+help() unless @ARGV;
+
+if($ARGV[-1] =~ /:$/) {
+    my $destination = pop @ARGV;
+    $destination    =~ s/:$//;
+
+    my $output = qx(git remote show -n $destination);
+    if($?) {
+        exit($?);
+    }
+    if($output =~ /Push\s*URL:\s*(.*)\n/) {
+        $destination = $1;
+
+        if($destination =~ m!ssh://([^/]+)/(.*)!) {
+            $destination = join(':', $1, $2);
+        }
+        $destination .= '/' unless $destination =~ /\/$/;
+
+        exec 'scp', @ARGV, $destination;
+    } else {
+        die "git remote show output was not what I expected!\n";
+    }
+} else {
+    die "not yet implemented";
+}
