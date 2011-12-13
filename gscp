@@ -25,28 +25,34 @@ END_HELP
     exit 0;
 }
 
-help() unless @ARGV;
+sub resolve_remote {
+    my ( $remote ) = @_;
 
-if($ARGV[-1] =~ /:$/) {
-    my $destination = pop @ARGV;
-    $destination    =~ s/:$//;
-
-    my $output = qx(git remote show -n $destination);
+    my $output = qx(git remote show -n $remote);
     if($?) {
         exit($?);
     }
     if($output =~ /Push\s*URL:\s*(.*)\n/) {
-        $destination = $1;
+        my $destination = $1;
 
         if($destination =~ m!ssh://([^/]+)/(.*)!) {
             $destination = join(':', $1, $2);
         }
         $destination .= '/' unless $destination =~ /\/$/;
-
-        exec 'scp', @ARGV, $destination;
+        return $destination;
     } else {
         die "git remote show output was not what I expected!\n";
     }
+}
+
+help() unless @ARGV;
+
+my $destination = pop @ARGV;
+
+if($destination =~ /:$/) {
+    $destination =~ s/:$//;
+    $destination = resolve_remote($destination);
+    exec 'scp', @ARGV, $destination;
 } else {
     die "not yet implemented";
 }
