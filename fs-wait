@@ -1,0 +1,114 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use Linux::Inotify2;
+
+sub help {
+    print <<"END_HELP";
+usage: $0
+END_HELP
+    exit(1);
+}
+
+sub add_watcher {
+    my ( $watcher_specs, $type ) = @_;
+
+    return sub {
+        my ( undef, $arg ) = @_;
+
+        push @{$watcher_specs}, {
+            mask     => $type,
+            filename => $arg,
+        };
+    }
+}
+
+sub only_has_one_bit_set {
+    my ( $n ) = @_;
+
+    return !($n & ($n - 1));
+}
+
+sub get_inotify_masks {
+    my %masks;
+
+    foreach my $key (keys %Linux::Inotify2::) {
+        next unless $key =~ /^IN_/;
+
+        my $glob = $Linux::Inotify2::{$key};
+        my $fn   = *{$glob}{'CODE'};
+
+        next unless $fn;
+
+        my $value = $fn->();
+        next unless only_has_one_bit_set($value);
+
+        $masks{$value} = $key;
+    }
+
+    return %masks;
+}
+
+sub show_mask {
+    my ( $mask ) = @_;
+
+    my %masks = get_inotify_masks();
+
+    my @pieces;
+
+    foreach my $k (keys %masks) {
+        if($mask & $k) {
+            push @pieces, $masks{$k};
+        }
+    }
+    return join(', ', sort @pieces);
+}
+
+my @watcher_constructors;
+my $verbose;
+my $help;
+
+my $ok = GetOptions(
+    'd|delete=s{1,}' => add_watcher(\@watcher_constructors, IN_DELETE_SELF),
+    'v|verbose'      => \$verbose,
+    'h|help'         => \$help,
+);
+
+if(!$ok || $help) {
+    help();
+}
+
+my %watchers;
+my $inotify = Linux::Inotify2->new or die $!;
+
+foreach my $constructor (@watcher_constructors) {
+    my $filename = $constructor->{'filename'};
+    my $mask     = $constructor->{'mask'};
+
+    if($verbose) {
+        print STDERR "creating inotify watcher on file '$filename' with mask: "
+            . show_mask($mask) . "\n";
+    }
+
+    my $w = $inotify->watch($filename, $mask) or die $!;
+    $watchers{$w} = $w;
+}
+
+unless(%watchers) {
+    help();
+}
+
+while(%watchers) {
+    my @events = $inotify->read;
+    foreach my $event (@events) {
+        if($verbose) {
+            my $filename = $event->fullname;
+            print STDERR "saw event for filename '$filename' ("
+                . show_mask($event->mask) . '); deleting watcher' . "\n";
+        }
+        delete $watchers{$event->w};
+    }
+}
