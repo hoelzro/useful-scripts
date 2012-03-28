@@ -10,6 +10,7 @@ use Plack::Builder;
 my $proxy = Plack::App::Proxy->new(preserve_host_header => 1)->to_app;
 
 builder {
+    enable 'Proxy::Connect';
     enable sub {
         my ( $app ) = @_;
 
