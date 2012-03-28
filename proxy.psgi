@@ -5,13 +5,21 @@ use warnings;
 
 use Data::Dumper;
 use Plack::App::Proxy;
+use Plack::Builder;
 
 my $proxy = Plack::App::Proxy->new(preserve_host_header => 1)->to_app;
 
-sub {
-    my ( $env ) = @_;
+builder {
+    enable sub {
+        my ( $app ) = @_;
 
-    $env->{'plack.proxy.url'} = $env->{'REQUEST_URI'};
+        return sub {
+            my ( $env ) = @_;
 
-    return $proxy->($env);
-}
+            $env->{'plack.proxy.url'} = $env->{'REQUEST_URI'};
+
+            return $app->($env);
+        };
+    };
+    $proxy;
+};
