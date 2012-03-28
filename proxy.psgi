@@ -1,4 +1,4 @@
-#!/usr/bin/env plackup
+#!/usr/bin/env twiggy
 
 use strict;
 use warnings;
