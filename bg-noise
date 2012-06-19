@@ -2,4 +2,10 @@
 
 # bg-noise - A script for playing background noise
 
+if ! [[ -z "$TMUX" ]]; then
+    tmux set-window-option monitor-activity off
+fi
+
+trap "tmux set-window-option monitor-activity on" SIGINT
+
 play -n -c1 synth whitenoise lowpass -1 120 lowpass -1 120 lowpass -1 120 gain +14
