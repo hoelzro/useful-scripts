@@ -1,0 +1,253 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use autodie;
+use utf8;
+
+use AnyEvent;
+use AnyEvent::Handle;
+use Curses;
+use List::Util qw(min);
+use Try::Tiny;
+
+my @input_lines;
+my $lines_offset = 0;
+my $cursor_index = 0;
+my $cond = AnyEvent->condvar;
+
+my %actions_for_command;
+
+sub get_viewport {
+    my $term_height = $Curses::LINES;
+
+    my $start = $lines_offset;
+    my $end   = min($lines_offset + $term_height - 1, $#input_lines);
+
+    return @input_lines[ $start .. $end ];
+}
+
+sub draw_cursor {
+    my ( $index ) = @_;
+
+    addstr $index, 0, '→';
+}
+
+sub draw_line {
+    my ( $line, $index ) = @_;
+
+    addstr $index, 2, $line;
+}
+
+sub refresh_screen {
+    my @lines = get_viewport;
+
+    clear;
+    draw_cursor $cursor_index;
+    my $index = 0;
+    foreach my $line (@lines) {
+        draw_line $line, $index++;
+    }
+    refresh;
+}
+
+sub can_move_viewport_down {
+    my $viewport_end = $lines_offset + $Curses::LINES - 1;
+
+    return $viewport_end < $#input_lines;
+}
+
+sub can_move_viewport_up {
+    return $lines_offset > 0;
+}
+
+sub move_viewport_down {
+    $lines_offset++;
+}
+
+sub move_viewport_up {
+    $lines_offset--;
+}
+
+sub can_move_cursor_down {
+    my $num_viewport_lines = @input_lines - $lines_offset;
+
+    return $cursor_index < $Curses::LINES - 1
+        && $cursor_index < $num_viewport_lines - 1;
+}
+
+sub can_move_cursor_up {
+    return $cursor_index > 0;
+}
+
+sub move_cursor_down {
+    $cursor_index++;
+}
+
+sub move_cursor_up {
+    $cursor_index--;
+}
+
+sub parse_line {
+    my ( $line ) = @_;
+
+    $line =~ s/\e\[.*?[mK]//g;
+    return $line;
+}
+
+sub handle_input_line {
+    my ( $line ) = @_;
+
+    $line = parse_line($line);
+
+    push @input_lines, $line;
+    refresh_screen;
+}
+
+sub handle_command {
+    my ( $char ) = @_;
+
+    my $action = $actions_for_command{$char};
+
+    return unless $action;
+
+    $action->();
+}
+
+sub startup_curses {
+    initscr;
+    noecho;
+    cbreak;
+    keypad 1;
+}
+
+sub shutdown_curses {
+    nocbreak;
+    keypad 0;
+    echo;
+    endwin;
+}
+
+sub run_editor {
+    my ( $filename, $line_no ) = @_;
+
+    my @cmd_line = ( 'vim', $filename );
+    push @cmd_line, '+' . $line_no if defined $line_no;
+
+    shutdown_curses;
+
+    my $pid = fork;
+
+    if($pid) {
+        waitpid $pid, 0;
+    } else {
+        open STDIN, '<', '/dev/tty';
+        exec @cmd_line;
+    }
+
+    startup_curses;
+    refresh_screen;
+}
+
+sub main {
+    try {
+        startup_curses;
+
+        my $input_handle = AnyEvent::Handle->new(
+            fh      => \*STDIN,
+            on_read => sub {
+                my ( $h ) = @_;
+
+                $h->push_read(line => sub {
+                    my ( undef, $line ) = @_;
+
+                    handle_input_line $line;
+                });
+            },
+            on_eof => sub {},
+        );
+
+        my $command_fh;
+        open $command_fh, '<', '/dev/tty';
+
+        my $command_handle = AnyEvent::Handle->new(
+            fh      => $command_fh,
+            on_read => sub {
+                my ( $h ) = @_;
+
+                $h->push_read(chunk => 1, sub {
+                    my ( undef, $char ) = @_;
+
+                    handle_command($char);
+                });
+            },
+        );
+
+        my $sigint = AnyEvent->signal(
+            signal => 'INT',
+            cb     => sub {
+                $cond->send;
+            },
+        );
+
+        my $sigterm = AnyEvent->signal(
+            signal => 'TERM',
+            cb     => sub {
+                $cond->send;
+            },
+        );
+
+        $cond->recv;
+    } finally {
+        shutdown_curses;
+    };
+}
+
+$actions_for_command{'q'} = sub {
+    $cond->send;
+};
+
+$actions_for_command{'j'} = sub {
+    if(can_move_viewport_down) {
+        move_viewport_down;
+    } elsif(can_move_cursor_down) {
+        move_cursor_down;
+    }
+    refresh_screen;
+};
+
+$actions_for_command{'k'} = sub {
+    if(can_move_cursor_up) {
+        move_cursor_up;
+    } elsif(can_move_viewport_up) {
+        move_viewport_up;
+    }
+    refresh_screen;
+};
+
+$actions_for_command{"\r"} = sub {
+    my $line_index   = $lines_offset + $cursor_index;
+    my $current_line = $input_lines[ $line_index ];
+
+    return unless $current_line =~ /\S/;
+
+    if(-f $current_line) {
+        shutdown_curses;
+
+        run_editor $current_line;
+
+        startup_curses;
+        refresh_screen;
+    } elsif($current_line =~ /(\d+):/) {
+        my $filename_index = $line_index - 1;
+
+        while($input_lines[$filename_index] =~ /\S/ && $filename_index >= 0) {
+            $filename_index--;
+        }
+        my $filename = $input_lines[$filename_index + 1];
+
+        run_editor $filename, $1;
+    }
+};
+
+main;
