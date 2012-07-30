@@ -88,6 +88,25 @@ sub move_cursor_up {
     $cursor_index--;
 }
 
+sub parse_color {
+    my ( $color ) = @_;
+
+    my @attributes = grep { $_ ne '' } split /;/, $color;
+    my %color;
+
+    foreach my $value (@attributes) {
+        if($value >= 40) {
+            $color{'background'} = $value - 40;
+        } elsif($value >= 30) {
+            $color{'foreground'} = $value - 30;
+        } else {
+            # ignore other attributes (for now)
+        }
+    }
+
+    return \%color;
+}
+
 sub parse_line {
     my ( $line ) = @_;
 
