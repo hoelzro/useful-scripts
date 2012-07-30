@@ -129,7 +129,6 @@ sub parse_line {
     my $current_color = parse_color '0';
     my @pieces;
 
-    use feature qw(say);
     while($line =~ s/^(.*?)\e\[([^m]+)m//) {
         my ( $prefix, $color ) = ( $1, $2 );
 
