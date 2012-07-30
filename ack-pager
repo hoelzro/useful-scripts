@@ -36,7 +36,12 @@ sub draw_cursor {
 sub draw_line {
     my ( $line, $index ) = @_;
 
-    addstr $index, 2, $line;
+    # XXX can we take advantage of curses advancing the cursor?
+    my $col = 2;
+    foreach my $part (@$line) {
+        addstr $index, $col, $part->{'value'};
+        $col += length($part->{'value'});
+    }
 }
 
 sub refresh_screen {
