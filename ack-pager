@@ -174,6 +174,12 @@ sub handle_command {
 
 sub startup_curses {
     initscr;
+    start_color;
+    for my $fg ( 0 .. 7 ) {
+        for my $bg ( 0 .. 7 ) {
+            init_pair $fg * 8 + $bg, $fg, $bg;
+        }
+    }
     noecho;
     cbreak;
     keypad 1;
