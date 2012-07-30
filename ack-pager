@@ -36,11 +36,10 @@ sub draw_cursor {
 sub draw_line {
     my ( $line, $index ) = @_;
 
-    # XXX can we take advantage of curses advancing the cursor?
-    my $col = 2;
+    # XXX actually use the color
+    move $index, 2;
     foreach my $part (@$line) {
-        addstr $index, $col, $part->{'value'};
-        $col += length($part->{'value'});
+        addstr $part->{'value'};
     }
 }
 
