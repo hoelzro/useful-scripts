@@ -105,7 +105,7 @@ sub parse_color {
     my ( $color ) = @_;
 
     my @attributes = grep { $_ ne '' } split /;/, $color;
-    my %color;
+    my %color = ( background => 0, foreground => 7 );
 
     foreach my $value (@attributes) {
         if($value >= 40) {
