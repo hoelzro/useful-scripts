@@ -93,6 +93,15 @@ sub move_cursor_up {
     $cursor_index--;
 }
 
+sub is_in_viewport {
+    my ( $line_index ) = @_;
+
+    my $viewport_end = $lines_offset + $Curses::LINES - 1;
+
+    return $line_index >= $lines_offset &&
+           $line_index <= $viewport_end;
+}
+
 sub parse_color {
     my ( $color ) = @_;
 
@@ -143,7 +152,9 @@ sub handle_input_line {
     $line = parse_line($line);
 
     push @input_lines, $line;
-    refresh_screen;
+    if(is_in_viewport($#input_lines)) {
+        refresh_screen;
+    }
 }
 
 sub handle_command {
