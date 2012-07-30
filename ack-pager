@@ -146,6 +146,12 @@ sub parse_line {
     return \@pieces;
 }
 
+sub unparse_line {
+    my ( $parsed_line ) = @_;
+
+    return join('', map { $_->{'value'} } @$parsed_line);
+}
+
 sub handle_input_line {
     my ( $line ) = @_;
 
@@ -282,6 +288,8 @@ $actions_for_command{"\r"} = sub {
     my $line_index   = $lines_offset + $cursor_index;
     my $current_line = $input_lines[ $line_index ];
 
+    $current_line = unparse_line($current_line);
+
     return unless $current_line =~ /\S/;
 
     if(-f $current_line) {
@@ -294,10 +302,10 @@ $actions_for_command{"\r"} = sub {
     } elsif($current_line =~ /(\d+):/) {
         my $filename_index = $line_index - 1;
 
-        while($input_lines[$filename_index] =~ /\S/ && $filename_index >= 0) {
+        while(unparse_line($input_lines[$filename_index]) =~ /\S/ && $filename_index >= 0) {
             $filename_index--;
         }
-        my $filename = $input_lines[$filename_index + 1];
+        my $filename = unparse_line($input_lines[$filename_index + 1]);
 
         run_editor $filename, $1;
     }
