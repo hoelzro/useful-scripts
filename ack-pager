@@ -36,9 +36,10 @@ sub draw_cursor {
 sub draw_line {
     my ( $line, $index ) = @_;
 
-    # XXX actually use the color
     move $index, 2;
     foreach my $part (@$line) {
+        my ( $fg, $bg ) = @{$part->{'color'}}{qw/foreground background/};
+        attr_on COLOR_PAIR($fg * 8 + $bg), 0;
         addstr $part->{'value'};
     }
 }
