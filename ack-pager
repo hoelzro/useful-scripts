@@ -50,8 +50,8 @@ sub draw_line {
     foreach my $part (@$line) {
         my ( $fg, $bg, $attrs ) = @{$part->{'attributes'}}{qw/foreground background attributes/};
         attr_on COLOR_PAIR($fg * 8 + $bg), 0;
-        if($attrs) {
-            attr_on $_, 0 foreach @$attrs;
+        if(defined $attrs) {
+            attr_on $attrs, 0;
         }
         addstr $part->{'value'};
     }
@@ -128,7 +128,7 @@ sub parse_attributes {
             $attributes{'foreground'} = $value - 30;
         } else {
             if(defined(my $mapping = $ATTR_MAPPING{$value})) {
-                push @{ $attributes{'attributes'} ||= [] }, $mapping;
+                $attributes{'attributes'} = ($attributes{'attributes'} || 0) | $mapping;
             }
         }
     }
