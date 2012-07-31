@@ -38,7 +38,7 @@ sub draw_line {
 
     move $index, 2;
     foreach my $part (@$line) {
-        my ( $fg, $bg ) = @{$part->{'color'}}{qw/foreground background/};
+        my ( $fg, $bg ) = @{$part->{'attributes'}}{qw/foreground background/};
         attr_on COLOR_PAIR($fg * 8 + $bg), 0;
         addstr $part->{'value'};
     }
@@ -102,23 +102,23 @@ sub is_in_viewport {
            $line_index <= $viewport_end;
 }
 
-sub parse_color {
-    my ( $color ) = @_;
+sub parse_attributes {
+    my ( $attrs ) = @_;
 
-    my @attributes = grep { $_ ne '' } split /;/, $color;
-    my %color = ( background => 0, foreground => 7 );
+    my @attributes = grep { $_ ne '' } split /;/, $attrs;
+    my %attributes = ( background => 0, foreground => 7 );
 
     foreach my $value (@attributes) {
         if($value >= 40) {
-            $color{'background'} = $value - 40;
+            $attributes{'background'} = $value - 40;
         } elsif($value >= 30) {
-            $color{'foreground'} = $value - 30;
+            $attributes{'foreground'} = $value - 30;
         } else {
             # ignore other attributes (for now)
         }
     }
 
-    return \%color;
+    return \%attributes;
 }
 
 sub parse_line {
@@ -126,18 +126,18 @@ sub parse_line {
 
     $line =~ s/\e\[K//;
 
-    my $current_color = parse_color '0';
+    my $current_attrs = parse_attributes '0';
     my @pieces;
 
     while($line =~ s/^(.*?)\e\[([^m]+)m//) {
-        my ( $prefix, $color ) = ( $1, $2 );
+        my ( $prefix, $attrs ) = ( $1, $2 );
 
-        push @pieces, { value => $prefix, color => $current_color };
+        push @pieces, { value => $prefix, attributes => $current_attrs };
 
-        $current_color = parse_color($color);
+        $current_attrs = parse_attributes $attrs;
     }
     if($line) {
-        push @pieces, { value => $line, color => $current_color };
+        push @pieces, { value => $line, attributes => $current_attrs };
     }
 
     @pieces = grep { $_->{'value'} ne '' } @pieces;
