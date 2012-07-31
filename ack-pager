@@ -141,7 +141,7 @@ sub parse_line {
 
     $line =~ s/\e\[K//;
 
-    my $current_attrs = parse_attributes '0';
+    my $current_attrs = parse_attributes '';
     my @pieces;
 
     while($line =~ s/^(.*?)\e\[([^m]+)m//) {
