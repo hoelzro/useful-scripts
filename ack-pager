@@ -278,6 +278,9 @@ sub main {
         $cond->recv;
     } finally {
         shutdown_curses;
+        if(@_) {
+            print join(' ', @_), "\n";
+        }
     };
 }
 
