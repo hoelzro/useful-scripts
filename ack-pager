@@ -49,10 +49,11 @@ sub draw_line {
     move $index, 2;
     foreach my $part (@$line) {
         my ( $fg, $bg, $attrs ) = @{$part->{'attributes'}}{qw/foreground background attributes/};
-        attr_on COLOR_PAIR($fg * 8 + $bg), 0;
+
         if(defined $attrs) {
-            attr_on $attrs, 0;
+            attr_set $attrs, 0, 0;
         }
+        attr_on COLOR_PAIR($fg * 8 + $bg), 0;
         addstr $part->{'value'};
     }
 }
