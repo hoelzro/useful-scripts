@@ -17,6 +17,7 @@ my $cursor_index = 0;
 my $cond = AnyEvent->condvar;
 
 my %ATTR_MAPPING = (
+    0 => A_NORMAL,
     1 => A_BOLD,
     2 => A_DIM,
     4 => A_UNDERLINE,
