@@ -155,8 +155,6 @@ sub parse_line {
         push @pieces, { value => $line, attributes => $current_attrs };
     }
 
-    @pieces = grep { $_->{'value'} ne '' } @pieces;
-
     return \@pieces;
 }
 
