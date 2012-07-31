@@ -16,6 +16,15 @@ my $lines_offset = 0;
 my $cursor_index = 0;
 my $cond = AnyEvent->condvar;
 
+my %ATTR_MAPPING = (
+    1 => A_BOLD,
+    2 => A_DIM,
+    4 => A_UNDERLINE,
+    5 => A_BLINK,
+    7 => A_REVERSE,
+    8 => A_INVIS,
+);
+
 my %actions_for_command;
 
 sub get_viewport {
@@ -114,7 +123,9 @@ sub parse_attributes {
         } elsif($value >= 30) {
             $attributes{'foreground'} = $value - 30;
         } else {
-            # ignore other attributes (for now)
+            if(defined(my $mapping = $ATTR_MAPPING{$value})) {
+                push @{ $attributes{'attributes'} ||= [] }, $mapping;
+            }
         }
     }
 
