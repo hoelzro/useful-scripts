@@ -228,6 +228,8 @@ sub run_editor {
 }
 
 sub main {
+    $0 = 'ack-pager';
+
     try {
         startup_curses;
 
