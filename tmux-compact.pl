@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use feature 'say';
 
-my $last_index;
+my $last_index = 0;
 my $active_window;
 my @windows = qx(tmux list-windows -F '#{window_active} #{window_index}');
 
