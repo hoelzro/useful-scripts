@@ -17,7 +17,9 @@ use 5.8.0;
 
 # XXX Don't make this so brute force
 
-use Carp ();
+use Getopt::Long 2.36 ();
+
+use Carp 1.22 ();
 
 our $VERSION = '2.00a01';
 # Check http://betterthangrep.com/ for updates
@@ -25,6 +27,8 @@ our $VERSION = '2.00a01';
 # These are all our globals.
 
 MAIN: {
+    $App::Ack::orig_program_name = $0;
+    $0 = join(' ', 'ack', $0);
     if ( $App::Ack::VERSION ne $main::VERSION ) {
         App::Ack::die( "Program/library version mismatch\n\t$0 is $main::VERSION\n\t$INC{'App/Ack.pm'} is $App::Ack::VERSION" );
     }
@@ -43,12 +47,20 @@ MAIN: {
             $env_is_usable = defined $1 ? 0 : 1;
         }
     }
-    @ARGV = grep { defined() } @ARGV; # filter out options we discarded
     if ( !$env_is_usable ) {
         my @keys = ( 'ACKRC', grep { /^ACK_/ } keys %ENV );
         delete @ENV{@keys};
     }
     App::Ack::load_colors();
+
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version');
+    Getopt::Long::Configure('pass_through', 'no_auto_abbrev');
+    Getopt::Long::GetOptions(
+        'help'       => sub { App::Ack::show_help(); exit; },
+        'version'    => sub { App::Ack::print_version_statement(); exit; },
+        'man'        => sub { App::Ack::show_man(); exit; },
+    );
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version');
 
     if ( !@ARGV ) {
         App::Ack::show_help();
@@ -108,10 +120,10 @@ sub _compile_file_filter {
     my $inverse_filters = [ grep {  $_->is_inverted() } @{$filters} ];
     @{$filters}         =   grep { !$_->is_inverted() } @{$filters};
 
-    my %is_member_of_starting_set = map { ($_ => 1) } @{$start};
+    my %is_member_of_starting_set = map { (App::Ack::get_file_id($_) => 1) } @{$start};
 
     return sub {
-        return 1 if $is_member_of_starting_set{ $File::Next::name };
+        return 1 if $is_member_of_starting_set{ App::Ack::get_file_id($File::Next::name) };
 
         foreach my $filter (@ifiles_filters) {
             my $resource = App::Ack::Resource::Basic->new($File::Next::name);
@@ -145,10 +157,24 @@ sub _compile_file_filter {
     };
 }
 
+sub show_types {
+    my $resource = shift;
+    my $ors      = shift;
+
+    my @types = App::Ack::filetypes( $resource );
+    my $types = join( ',', @types );
+    my $arrow = @types ? ' => ' : ' =>';
+    print $resource->name, $arrow, join( ',', @types ), $ors;
+
+    return;
+}
+
 sub main {
     my @arg_sources = App::Ack::retrieve_arg_sources();
 
     my $opt = App::Ack::ConfigLoader::process_args( @arg_sources );
+
+    $App::Ack::report_bad_filenames = !$opt->{dont_report_bad_filenames};
 
     if ( $opt->{flush} ) {
         $| = 1;
@@ -201,7 +227,7 @@ sub main {
         else {
             @start = ('.') unless @start;
             foreach my $target (@start) {
-                if ( not -e $target ) {
+                if ( !-e $target && $App::Ack::report_bad_filenames) {
                     App::Ack::warn( "$target: No such file or directory" );
                 }
             }
@@ -224,12 +250,14 @@ RESOURCES:
     while ( my $resource = $resources->next ) {
         # XXX this variable name combined with what we're trying
         # to do makes no sense.
+
+        # XXX Combine the -f and -g functions
         if ( $opt->{f} ) {
             # XXX printing should probably happen inside of App::Ack
-            if($opt->{show_types}) {
-                my @types = App::Ack::filetypes($resource);
-                print $resource->name, ' => ', join(',', @types), $ors;
-            } else {
+            if ( $opt->{show_types} ) {
+                show_types( $resource, $ors );
+            }
+            else {
                 print $resource->name, $ors;
             }
             ++$nmatches;
@@ -238,10 +266,10 @@ RESOURCES:
         elsif ( $opt->{g} ) {
             my $is_match = ( $resource->name =~ /$opt->{regex}/o );
             if ( $opt->{v} ? !$is_match : $is_match ) {
-                if($opt->{show_types}) {
-                    my @types = App::Ack::filetypes($resource);
-                    print $resource->name, ' => ', join(',', @types), $ors;
-                } else {
+                if ( $opt->{show_types} ) {
+                    show_types( $resource, $ors );
+                }
+                else {
                     print $resource->name, $ors;
                 }
                 ++$nmatches;
@@ -264,6 +292,8 @@ RESOURCES:
             }
 
             my $filename = $resource->name;
+
+            local $opt->{color} = 0;
 
             App::Ack::iterate($resource, $opt, sub {
                 chomp;
@@ -297,6 +327,9 @@ RESOURCES:
                 # XXX printing should probably happen inside of App::Ack
                 print $resource->name, $ors;
                 ++$nmatches;
+
+                last if $only_first;
+                last if defined($max_count) && $nmatches >= $max_count;
             }
         }
         else {
@@ -328,6 +361,15 @@ Ack is designed as a replacement for 99% of the uses of F<grep>.
 Ack searches the named input FILEs (or standard input if no files
 are named, or the file name - is given) for lines containing a match
 to the given PATTERN.  By default, ack prints the matching lines.
+
+PATTERN is a Perl regular expression.  Perl regular expressions
+are commonly found in other programming languages, but for the particulars
+of their behavior, please consult
+L<http://perldoc.perl.org/perlreref.html|perlreref>.  If you don't know
+how to use regular expression but are interested in learning, you may
+consult L<http://perldoc.perl.org/perlretut.html|perlretut>.  If you do not
+need or want ack to use regular expressions, please see the
+C<-Q>/C<--literal> option.
 
 Ack can also list files that would be searched, without actually
 searching them, to let you take advantage of ack's file-type filtering
@@ -402,6 +444,11 @@ Print I<NUM> lines of trailing context after matching lines.
 
 Print I<NUM> lines of leading context before matching lines.
 
+=item B<--[no]break>
+
+Print a break between results from different files. On by default
+when used interactively.
+
 =item B<-C [I<NUM>]>, B<--context[=I<NUM>]>
 
 Print I<NUM> lines (default 2) of context around matching lines.
@@ -441,6 +488,11 @@ Sets the color to be used for line numbers.
 
 Show the column number of the first match.  This is helpful for
 editors that can place your cursor at a given position.
+
+=item B<--create-ackrc>
+
+Dumps the default ack options to standard output.  This is useful for
+when you want to customize the defaults.
 
 =item B<--env>, B<--noenv>
 
@@ -492,9 +544,18 @@ Print the filename for each match.
 Suppress the prefixing of filenames on output when multiple files are
 searched.
 
+=item B<--[no]heading>
+
+Print a filename heading above each file's results.  This is the default
+when used interactively.
+
 =item B<--help>
 
 Print a short help statement.
+
+=item B<--help-types>
+
+Print all known types.
 
 =item B<-i>, B<--ignore-case>
 
@@ -516,6 +577,10 @@ directories like F<foo/bar> are NOT supported. You would need to
 specify B<--ignore-dir=foo> and then no files from any foo directory
 are taken into account by ack unless given explicitly on the command
 line.
+
+=item B<-k>, B<--known-types>
+
+Limit selected files to those with types that ack knows about.
 
 =item B<--line=I<NUM>>
 
@@ -565,13 +630,16 @@ highlighting)
 Output the evaluation of I<expr> for each line (turns off text
 highlighting)
 
-=item B<--pager=I<program>>
+=item B<--pager=I<program>>, B<--nopager>
 
-Direct ack's output through I<program>.  This can also be specified
+B<--pager> directs ack's output through I<program>.  This can also be specified
 via the C<ACK_PAGER> and C<ACK_PAGER_COLOR> environment variables.
 
 Using --pager does not suppress grouping and coloring like piping
 output on the command-line does.
+
+B<--nopager> cancels any setting in ~/.ackrc, C<ACK_PAGER> or C<ACK_PAGER_COLOR>.
+No output will be sent through a pager.
 
 =item B<--passthru>
 
@@ -602,6 +670,11 @@ and B<-G> options.
 
 Recurse into sub-directories. This is the default and just here for
 compatibility with grep. You can also use it for turning B<--no-recurse> off.
+
+=item B<-s>
+
+Suppress error messages about nonexistent or unreadable files.  This is taken
+from fgrep.
 
 =item B<--smart-case>, B<--no-smart-case>
 
@@ -756,8 +829,8 @@ The following does B<NOT> work in the F<.ackrc> file:
   --type-set eiffel=.e,.eiffel
 
 
-In order to see all currently defined types, use I<--help types>, e.g.
-I<ack --type-set backup=.bak --type-add perl=.perl --help types>
+In order to see all currently defined types, use I<--help-types>, e.g.
+I<ack --type-set backup=.bak --type-add perl=.perl --help-types>
 
 Restrictions:
 
@@ -854,11 +927,11 @@ If you are not on Windows, you never need to use C<ACK_PAGER_COLOR>.
 F<ack> integrates easily with the Vim text editor. Set this in your
 F<.vimrc> to use F<ack> instead of F<grep>:
 
-    set grepprg=ack\ -a
+    set grepprg=ack\ -k
 
-That examples uses C<-a> to search through all files, but you may
-use other default flags. Now you can search with F<ack> and easily
-step through the results in Vim:
+That example uses C<-k> to search through only files of the types ack
+knows about, but you may use other default flags. Now you can search
+with F<ack> and easily step through the results in Vim:
 
   :grep Dumper perllib
 
@@ -1034,6 +1107,13 @@ so would require reading in the entire file at a time.
 If you want to see lines near your match, use the C<--A>, C<--B>
 and C<--C> switches for displaying context.
 
+=head2 Why is ack telling me I have an invalid option when searching for C<+foo>?
+
+ack treats command line options beginning with C<+> or C<-> as options; if you
+would like to search for these, you may prefix your search term with C<--> or
+use the C<--match> option.  (However, don't forget that C<+> is a regular
+expression metacharacter!)
+
 =head1 ACKRC LOCATION SEMANTICS
 
 Ack can load its configuration from many sources.  This list
@@ -1146,6 +1226,7 @@ L<https://github.com/petdance/ack>
 How appropriate to have I<ack>nowledgements!
 
 Thanks to everyone who has contributed to ack in any way, including
+Ralph Bodenner,
 Shaun Patterson,
 Ryan Olson,
 Shlomi Fish,
@@ -1457,7 +1538,7 @@ package App::Ack;
 use warnings;
 use strict;
 
-use Getopt::Long;
+use Getopt::Long 2.36 ();
 
 
 our $VERSION;
@@ -1486,9 +1567,8 @@ our $dir_sep_chars;
 our $is_cygwin;
 our $is_windows;
 
-use File::Spec ();
-use File::Glob ':glob';
-use Getopt::Long ();
+use File::Spec 1.00015 ();
+use File::Glob 1.00015 ':glob';
 
 BEGIN {
     # These have to be checked before any filehandle diddling.
@@ -1507,16 +1587,16 @@ sub retrieve_arg_sources {
     my $noenv;
     my $ackrc;
 
-    Getopt::Long::Configure('default');
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version');
     Getopt::Long::Configure('pass_through');
     Getopt::Long::Configure('no_auto_abbrev');
 
-    GetOptions(
+    Getopt::Long::GetOptions(
         'noenv'   => \$noenv,
         'ackrc=s' => \$ackrc,
     );
 
-    Getopt::Long::Configure('default');
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version');
 
     my @files;
 
@@ -1582,8 +1662,7 @@ sub create_ignore_rules {
 
     my @opts = @{$opts};
 
-    my %rules = {
-    };
+    my %rules;
 
     for my $opt ( @opts ) {
         if ( $opt =~ /^(is|ext|regex),(.+)$/ ) {
@@ -1766,7 +1845,7 @@ Example: ack -i select
 Searching:
   -i, --ignore-case     Ignore case distinctions in PATTERN
   --[no]smart-case      Ignore case distinctions in PATTERN,
-                        only if PATTERN contains no upper case
+                        only if PATTERN contains no upper case.
                         Ignored if -i is specified
   -v, --invert-match    Invert match: select non-matching lines
   -w, --word-regexp     Force PATTERN to match only whole words
@@ -1803,6 +1882,9 @@ Search output:
   --print0              Print null byte as separator between filenames,
                         only works with -f, -g, -l, -L or -c.
 
+  -s                    Suppress error messages about nonexistent or
+                        unreadable files.
+
 
 File presentation:
   --pager=COMMAND       Pipes all ack output through COMMAND.  For example,
@@ -1827,9 +1909,9 @@ File presentation:
 
 
 File finding:
-  -f                    Only print the files found, without searching.
+  -f                    Only print the files selected, without searching.
                         The PATTERN must not be specified.
-  -g                    Same as -f, but only print files matching PATTERN.
+  -g                    Same as -f, but only select files matching PATTERN.
   --sort-files          Sort the found files lexically.
   --show-types          Show which types each file has.
   --files-from=FILE     Read the list of files to search from FILE.
@@ -1840,10 +1922,11 @@ File inclusion/exclusion:
   -r, -R, --recurse     Recurse into subdirectories (ack's default behavior)
   -n, --no-recurse      No descending into subdirectories
   --[no]follow          Follow symlinks.  Default is off.
+  -k, --known-types     Include only files with types that ack recognizes.
 
   --type=X              Include only X files, where X is a recognized filetype.
   --type=noX            Exclude X files.
-                        See "ack --help type" for supported filetypes.
+                        See "ack --help-types" for supported filetypes.
 
 File type specification:
   --type-set TYPE=.EXTENSION[,.EXT2[,...]]
@@ -1860,7 +1943,9 @@ Miscellaneous:
   --noenv               Ignore environment variables and global ackrc files
   --ackrc=filename      Specify an ackrc file to use
   --ignore-ack-defaults Ignore the default definitions that ack includes.
+  --create-ackrc        Outputs a default ackrc for your customization to standard output.
   --help                This help
+  --help-types          Display all known types
   --dump                Dump information on which options are loaded from which RC files
   --man                 Man page
   --version             Display version & copyright
@@ -1906,6 +1991,15 @@ END_OF_HELP
     }
 
     return;
+}
+
+sub show_man {
+    require Pod::Usage;
+    Pod::Usage::pod2usage({
+        -input   => $App::Ack::orig_program_name,
+        -verbose => 2,
+        -exitval => 0,
+    });
 }
 
 sub _listify {
@@ -1959,7 +2053,7 @@ sub get_copyright {
 
 
 sub load_colors {
-    eval 'use Term::ANSIColor ()';
+    eval 'use Term::ANSIColor 3.01 ()';
 
     $ENV{ACK_COLOR_MATCH}    ||= 'black on_yellow';
     $ENV{ACK_COLOR_FILENAME} ||= 'bold green';
@@ -2404,6 +2498,31 @@ sub filetypes {
     return sort @matches;
 }
 
+# returns a (fairly) unique identifier for a file
+# use this function to compare two files to see if they're
+# equal (ie. the same file, but with a different path/links/etc)
+sub get_file_id {
+    my ( $filename ) = @_;
+
+    if ( $is_windows ) {
+        return File::Next::reslash( $filename );
+    } else {
+        # XXX is this the best method? it always hits the FS
+        if( my ( $dev, $inode ) = (stat($filename))[0, 1] ) {
+            return join(':', $dev, $inode);
+        } else {
+            # XXX this could be better
+            return $filename;
+        }
+    }
+}
+
+sub create_ackrc {
+    my @lines = App::Ack::ConfigDefault::options();
+
+    print join("\n", '--ignore-ack-defaults', @lines);
+}
+
 
 
 1; # End of App::Ack
@@ -2478,12 +2597,18 @@ sub from_argv {
     my $self = bless {}, $class;
 
     my $file_filter    = undef;
-    my $descend_filter = undef;
+    my $descend_filter = $opt->{descend_filter};
+
+    if( $opt->{n} ) {
+        $descend_filter = sub {
+            return 0;
+        };
+    }
 
     $self->{iter} =
         File::Next::files( {
             file_filter     => $opt->{file_filter},
-            descend_filter  => $opt->{descend_filter},
+            descend_filter  => $descend_filter,
             error_handler   => sub { my $msg = shift; App::Ack::warn( $msg ) },
             sort_files      => $opt->{sort_files},
             follow_symlinks => $opt->{follow},
@@ -2564,7 +2689,7 @@ sub new {
         $self->{fh} = *STDIN;
     }
     else {
-        if ( !open( $self->{fh}, '<', $self->{filename} ) ) {
+        if ( !open( $self->{fh}, '<', $self->{filename} ) && $App::Ack::report_bad_filenames ) {
             App::Ack::warn( "$self->{filename}: $!" );
             return;
         }
@@ -2598,7 +2723,7 @@ sub needs_line_scan {
 
     my $buffer;
     my $rc = sysread( $self->{fh}, $buffer, $size );
-    if ( not defined $rc ) {
+    if ( !defined($rc) && $App::Ack::report_bad_filenames ) {
         App::Ack::warn( "$self->{filename}: $!" );
         return 1;
     }
@@ -2612,8 +2737,9 @@ sub needs_line_scan {
 sub reset {
     my $self = shift;
 
-    seek( $self->{fh}, 0, 0 )
-        or App::Ack::warn( "$self->{filename}: $!" );
+    if( !seek( $self->{fh}, 0, 0 ) && $App::Ack::report_bad_filenames ) {
+        App::Ack::warn( "$self->{filename}: $!" );
+    }
 
     return;
 }
@@ -2622,6 +2748,8 @@ sub reset {
 sub next_text {
     if ( defined ($_ = readline $_[0]->{fh}) ) {
         $. = ++$_[0]->{line};
+        s/[\r\n]+$//; # chomp may not handle this
+        $_ .= "\n"; # add back newline (XXX make it native)
         return 1;
     }
 
@@ -2632,7 +2760,7 @@ sub next_text {
 sub close {
     my $self = shift;
 
-    if ( not close $self->{fh} ) {
+    if ( !close($self->{fh}) && $App::Ack::report_bad_filenames ) {
         App::Ack::warn( $self->name() . ": $!" );
     }
 
@@ -2655,7 +2783,7 @@ use warnings;
 use overload
     '""' => 'to_string';
 
-use Carp ();
+use Carp 1.22 ();
 
 my %filter_types;
 
@@ -2723,7 +2851,7 @@ sub new {
         extensions => \@extensions,
         regex      => $re,
     }, $class;
-};
+}
 
 sub filter {
     my ( $self, $resource ) = @_;
@@ -2818,7 +2946,7 @@ BEGIN {
     our @ISA = 'App::Ack::Filter';
 }
 
-use File::Spec ();
+use File::Spec 3.00 ();
 
 sub new {
     my ( $class, $filename ) = @_;
@@ -2864,7 +2992,7 @@ BEGIN {
     our @ISA = 'App::Ack::Filter';
 }
 
-use File::Spec;
+use File::Spec 3.00;
 
 sub new {
     my ( $class, $re ) = @_;
@@ -2976,8 +3104,8 @@ package App::Ack::ConfigFinder;
 use strict;
 use warnings;
 
-use Cwd ();
-use File::Spec;
+use Cwd 3.00 ();
+use File::Spec 3.00;
 
 BEGIN {
     if($App::Ack::is_windows) {
@@ -3000,7 +3128,7 @@ sub _remove_redundancies {
     foreach my $path ( @configs ) {
         my ( $dev, $inode ) = (stat $path)[0, 1];
 
-        if( defined( $dev ) ) { # files that can't be read don't matter
+        if( defined($dev) ) {
             if( $dev_and_inode_seen{"$dev:$inode"} ) {
                 undef $path;
             } else {
@@ -3011,35 +3139,40 @@ sub _remove_redundancies {
     return grep { defined() } @configs;
 }
 
+sub _check_for_ackrc
+{
+    return unless defined $_[0];
+
+    my @files = grep { -f }
+                map { File::Spec->catfile(@_, $_) }
+                qw(.ackrc _ackrc);
+
+    die File::Spec->catdir(@_) . " contains both .ackrc and _ackrc.\n" .
+        "Please remove one of those files.\n"
+            if @files > 1;
+
+    return wantarray ? @files : $files[0];
+} # end _check_for_ackrc
+
 
 sub find_config_files {
     my @config_files;
 
     if($App::Ack::is_windows) {
-        no strict 'subs';
         push @config_files, map { File::Spec->catfile($_, 'ackrc') } (
-            Win32::GetFolderPath(Win32::CSIDL_COMMON_APPDATA),
-            Win32::GetFolderPath(Win32::CSIDL_APPDATA),
+            Win32::GetFolderPath(Win32::CSIDL_COMMON_APPDATA()),
+            Win32::GetFolderPath(Win32::CSIDL_APPDATA()),
         );
-        if(defined(my $home = $ENV{'HOME'})) {
-            push @config_files, File::Spec->catfile($home, '_ackrc');
-        }
     } else {
         push @config_files, '/etc/ackrc';
-        if(defined(my $home = $ENV{'HOME'})) {
-            push @config_files, File::Spec->catfile($home, '.ackrc');
-        }
     }
+
+    push @config_files, _check_for_ackrc($ENV{'HOME'});
 
     my @dirs = File::Spec->splitdir(Cwd::getcwd());
     while(@dirs) {
-        my $ackrc = File::Spec->catfile(@dirs, '.ackrc');
-        if(-f $ackrc) {
-            push @config_files, $ackrc;
-            last;
-        }
-        $ackrc = File::Spec->catfile(@dirs, '_ackrc');
-        if(-f $ackrc) {
+        my $ackrc = _check_for_ackrc(@dirs);
+        if(defined $ackrc) {
             push @config_files, $ackrc;
             last;
         }
@@ -3055,10 +3188,33 @@ package App::Ack::ConfigLoader;
 use strict;
 use warnings;
 
-use Carp ();
-use Getopt::Long; # Must be 2.36, but we can't check for that in the use.
-use Text::ParseWords ();
+use Carp 1.22 ();
+use Getopt::Long 2.36 ();
+use Text::ParseWords 3.1 ();
 
+
+my @INVALID_COMBINATIONS;
+
+BEGIN {
+    @INVALID_COMBINATIONS = (
+        # XXX normalize
+        [qw(-l)] => [qw(-A -B -C -L -o --passthru --output --max-count -h -H --with-filename --no-filename --column --after-context --before-context --context --heading --break --group -f -g --show-types)],
+        [qw(-L)] => [qw(-A -B -C -l -o --passthru --output --max-count -h -H --with-filename --no-filename --column --after-context --before-context --context --heading --break --group -f -g --show-types -c --count)],
+        [qw(--line)] => [qw(-l --files-with-matches --files-without-matches -L -o --passthru --match -m --max-count -1 -h -H --with-filename --no-filename -c --count --column -A --after-context -B --before-context -C --context --print0 -f -g --show-types)],
+        [qw(-o)] => [qw(--output -c --count --column -A -B -C --after-context --before-context --context --column -f --show-types)],
+        [qw(--passthru)] => [qw(--output -A -B -C --after-context --before-context --context --column -m --max-count -1 -c --count -f -g)],
+        [qw(--output)] => [qw(-c --count -f -g)],
+        [qw(--match)] => [qw(-f -g)],
+        [qw(-m --max-count)] => [qw(-1 -f -g -c --count)],
+        [qw(-h --no-filename)] => [qw(-H --with-filename -c --count -f -g --group --heading)],
+        [qw(-H --with-filename)] => [qw(-h --no-filename -c --count -f -g)],
+        [qw(-c --count)] => [qw(--column -A --after-context -B --before-context -C --context --heading --group --break -f -g)],
+        [qw(--column)] => [qw(-f -g)],
+        [qw(-A -B -C --after-context --before-context --context)] => [qw(-f -g)],
+        [qw(-f)] => [qw(-g --heading --group --break)],
+        [qw(-g)] => [qw(--heading --group --break)],
+    );
+}
 
 sub process_filter_spec {
     my ( $spec ) = @_;
@@ -3087,7 +3243,7 @@ sub process_filter_spec {
 sub process_filetypes {
     my ( $opt, $arg_sources ) = @_;
 
-    Getopt::Long::Configure('default'); # start with default options
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version'); # start with default options, minus some annoying ones
     Getopt::Long::Configure(
         'no_ignore_case',
         'no_auto_abbrev',
@@ -3133,9 +3289,17 @@ sub process_filetypes {
         };
     };
 
+    my $delete_spec = sub {
+        my ( undef, $name ) = @_;
+
+        delete $App::Ack::mappings{$name};
+        delete $additional_specs{$name . '!'};
+    };
+
     my %type_arg_specs = (
         'type-add=s' => $add_spec,
         'type-set=s' => $set_spec,
+        'type-del=s' => $delete_spec,
     );
 
     for ( my $i = 0; $i < @{$arg_sources}; $i += 2) {
@@ -3151,7 +3315,7 @@ sub process_filetypes {
         }
     }
 
-    $additional_specs{'known-types'} = sub {
+    $additional_specs{'k|known-types'} = sub {
         my ( undef, $value ) = @_;
 
         my @filters = map { @$_ } values(%App::Ack::mappings);
@@ -3162,8 +3326,23 @@ sub process_filetypes {
     return \%additional_specs;
 }
 
+sub removed_option {
+    my ( $option, $explanation ) = @_;
+
+    $explanation ||= '';
+    return sub {
+        warn "Option '$option' is not valid in ack 2\n$explanation";
+        exit 1;
+    };
+}
+
 sub get_arg_spec {
     my ( $opt, $extra_specs ) = @_;
+
+    my $dash_a_explanation = <<EOT;
+This is because we now have -k/--known-types which makes it only select files
+of known types, rather than any text file (which is the behavior of ack 1.x).
+EOT
 
     return {
         1                   => sub { $opt->{1} = $opt->{m} = 1 },
@@ -3171,7 +3350,8 @@ sub get_arg_spec {
         'B|before-context=i'
                             => \$opt->{before_context},
         'C|context:i'       => sub { shift; my $val = shift; $opt->{before_context} = $opt->{after_context} = ($val || 2) },
-        'a|all-types'       => \$opt->{all},
+        'a'                 => removed_option('-a', $dash_a_explanation),
+        'all'               => removed_option('--all', $dash_a_explanation),
         'break!'            => \$opt->{break},
         c                   => \$opt->{count},
         'color|colour!'     => \$opt->{color},
@@ -3180,6 +3360,7 @@ sub get_arg_spec {
         'color-lineno=s'    => \$ENV{ACK_COLOR_LINENO},
         'column!'           => \$opt->{column},
         count               => \$opt->{count},
+        'create-ackrc'      => sub { App::Ack::create_ackrc(); exit; },
         'env!'              => sub {
             my ( undef, $value ) = @_;
 
@@ -3193,6 +3374,7 @@ sub get_arg_spec {
         flush               => \$opt->{flush},
         'follow!'           => \$opt->{follow},
         g                   => \$opt->{g},
+        G                   => removed_option('-G'),
         'group!'            => sub { shift; $opt->{heading} = $opt->{break} = shift },
         'heading!'          => \$opt->{heading},
         'h|no-filename'     => \$opt->{h},
@@ -3245,6 +3427,7 @@ sub get_arg_spec {
         'print0'            => \$opt->{print0},
         'Q|literal'         => \$opt->{Q},
         'r|R|recurse'       => sub { $opt->{n} = 0 },
+        's'                 => \$opt->{dont_report_bad_filenames},
         'show-types'        => \$opt->{show_types},
         'smart-case!'       => \$opt->{smart_case},
         'sort-files'        => \$opt->{sort_files},
@@ -3265,7 +3448,8 @@ sub get_arg_spec {
                 Carp::croak( "Unknown type '$value'" );
             }
         },
-        'u|unrestricted'    => \$opt->{u},
+        'u'                 => removed_option('-u'),
+        'unrestricted'      => removed_option('--unrestricted'),
         'v|invert-match'    => \$opt->{v},
         'w|word-regexp'     => \$opt->{w},
         'x'                 => sub { $opt->{files_from} = '-' },
@@ -3273,13 +3457,7 @@ sub get_arg_spec {
         'version'           => sub { App::Ack::print_version_statement(); exit; },
         'help|?:s'          => sub { shift; App::Ack::show_help(@_); exit; },
         'help-types'        => sub { App::Ack::show_help_types(); exit; },
-        'man'               => sub {
-            require Pod::Usage;
-            Pod::Usage::pod2usage({
-                -verbose => 2,
-                -exitval => 0,
-            });
-        }, # man sub
+        'man'               => sub { App::Ack::show_man(); exit; },
         $extra_specs ? %{$extra_specs} : (),
     }; # arg_specs
 }
@@ -3287,11 +3465,35 @@ sub get_arg_spec {
 sub process_other {
     my ( $opt, $extra_specs, $arg_sources ) = @_;
 
-    Getopt::Long::Configure('default'); # start with default options
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version'); # start with default options, minus some annoying ones
     Getopt::Long::Configure(
         'bundling',
         'no_ignore_case',
     );
+
+    my $argv_source;
+    my $is_help_types_active;
+
+    for ( my $i = 0; $i < @{$arg_sources}; $i += 2 ) {
+        my ( $source_name, $args ) = @{$arg_sources}[ $i, $i + 1 ];
+
+        if ( $source_name eq 'ARGV' ) {
+            $argv_source = $args;
+            last;
+        }
+    }
+
+    if ( $argv_source ) { # this *should* always be true, but you never know...
+        my @copy = @{$argv_source};
+
+        Getopt::Long::Configure('pass_through');
+
+        Getopt::Long::GetOptionsFromArray( \@copy,
+            'help-types' => \$is_help_types_active,
+        );
+
+        Getopt::Long::Configure('no_pass_through');
+    }
 
     my $arg_specs = get_arg_spec($opt, $extra_specs);
 
@@ -3307,8 +3509,10 @@ sub process_other {
                 Getopt::Long::GetOptionsFromString( $args, %{$arg_specs} );
         }
         if ( !$ret ) {
-            my $where = $source_name eq 'ARGV' ? 'on command line' : "in $source_name";
-            App::Ack::die( "Invalid option $where" );
+            if ( !$is_help_types_active ) {
+                my $where = $source_name eq 'ARGV' ? 'on command line' : "in $source_name";
+                App::Ack::die( "Invalid option $where" );
+            }
         }
         if ( $opt->{noenv_seen} ) {
             App::Ack::die( "--noenv found in $source_name" );
@@ -3327,7 +3531,7 @@ sub should_dump_options {
         my ( $name, $options ) = @{$sources}[$i, $i + 1];
         if($name eq 'ARGV') {
             my $dump;
-            Getopt::Long::Configure('default', 'pass_through');
+            Getopt::Long::Configure('default', 'pass_through', 'no_auto_help', 'no_auto_version');
             Getopt::Long::GetOptionsFromArray($options,
                 'dump' => \$dump,
             );
@@ -3342,7 +3546,7 @@ sub explode_sources {
 
     my @new_sources;
 
-    Getopt::Long::Configure('default', 'pass_through');
+    Getopt::Long::Configure('default', 'pass_through', 'no_auto_help', 'no_auto_version');
 
     my %opt;
     my $arg_spec = get_arg_spec(\%opt);
@@ -3357,6 +3561,12 @@ sub explode_sources {
             ( $arg ) = split /:/, $arg;
             $arg_spec->{$arg} = sub {};
         }
+    };
+
+    my $del_type = sub {
+        my ( undef, $arg ) = @_;
+
+        delete $arg_spec->{$arg};
     };
 
     for(my $i = 0; $i < @{$sources}; $i += 2) {
@@ -3375,6 +3585,7 @@ sub explode_sources {
             Getopt::Long::GetOptionsFromArray(\@chunk,
                 'type-add=s' => $add_type,
                 'type-set=s' => $add_type,
+                'type-del=s' => $del_type,
             );
             Getopt::Long::GetOptionsFromArray(\@chunk, %{$arg_spec});
 
@@ -3442,7 +3653,7 @@ sub remove_default_options_if_needed {
 
     my $should_remove = 0;
 
-    Getopt::Long::Configure('default'); # start with default options
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version'); # start with default options, minus some annoying ones
     Getopt::Long::Configure(
         'no_ignore_case',
         'no_auto_abbrev',
@@ -3466,6 +3677,7 @@ sub remove_default_options_if_needed {
     }
 
     Getopt::Long::Configure('default');
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version');
 
     return $sources unless $should_remove;
 
@@ -3474,10 +3686,58 @@ sub remove_default_options_if_needed {
     return \@copy;
 }
 
+sub check_for_mutually_exclusive_options {
+    my ( $arg_sources ) = @_;
+
+    my %mutually_exclusive_with;
+    my @copy = @$arg_sources;
+
+    for(my $i = 0; $i < @INVALID_COMBINATIONS; $i += 2) {
+        my ( $lhs, $rhs ) = @INVALID_COMBINATIONS[ $i, $i + 1 ];
+
+        foreach my $l_opt ( @$lhs ) {
+            foreach my $r_opt ( @$rhs ) {
+                push @{ $mutually_exclusive_with{ $l_opt } }, $r_opt;
+                push @{ $mutually_exclusive_with{ $r_opt } }, $l_opt;
+            }
+        }
+    }
+
+    while( @copy ) {
+        my %set_opts;
+
+        my ( $source_name, $args ) = splice @copy, 0, 2;
+        $args = ref($args) ? [ @$args ] : [ Text::ParseWords::shellwords($args) ];
+
+        foreach my $opt ( @$args ) {
+            next unless $opt =~ /^[-+]/;
+            last if $opt eq '--';
+
+            if( $opt =~ /^(.*)=/ ) {
+                $opt = $1;
+            }
+
+            $set_opts{ $opt } = 1;
+
+            my $mutex_opts = $mutually_exclusive_with{ $opt };
+
+            next unless $mutex_opts;
+
+            foreach my $mutex_opt ( @$mutex_opts ) {
+                if($set_opts{ $mutex_opt }) {
+                    die "Options '$mutex_opt' and '$opt' are mutually exclusive\n";
+                }
+            }
+        }
+    }
+}
+
 sub process_args {
     my $arg_sources = \@_;
 
     my %opt;
+
+    check_for_mutually_exclusive_options($arg_sources);
 
     $arg_sources = remove_default_options_if_needed($arg_sources);
 
@@ -3638,6 +3898,12 @@ sub _options_block {
 # Ada http://www.adaic.org/
 --type-add=ada:ext:ada,adb,ads
 
+# ASP http://msdn.microsoft.com/en-us/library/aa286483.aspx
+--type-add=asp:ext:asp
+
+# ASP.Net http://www.asp.net/
+--type-add=aspx:ext:master,ascx,asmx,aspx,svc
+
 # Assembly
 --type-add=asm:ext:asm,s
 
@@ -3682,7 +3948,7 @@ sub _options_block {
 --type-add=go:ext:go
 
 # Groovy http://groovy.codehaus.org/
---type-add=groovy:ext:groovy,gtmpl,gpp,grunit
+--type-add=groovy:ext:groovy,gtmpl,gpp,grunit,gradle
 
 # Haskell http://www.haskell.org/
 --type-add=haskell:ext:hs,lhs
