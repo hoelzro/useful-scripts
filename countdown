@@ -1,0 +1,82 @@
+#!/usr/bin/env perl6
+
+use v6;
+
+class TimerDisplay {
+    submethod BUILD {
+        print "\n\e[s";
+    }
+
+    method update(Int $seconds is copy) {
+        my Int $hours   = $seconds div 3_600;
+        $seconds       %= 3_600;
+        my Int $minutes = $seconds div 60;
+        $seconds       %= 60;
+
+        printf "\e[2K\e[u%02d:%02d:%02d", $hours, $minutes, $seconds;
+    }
+
+    method finish {
+        print "\n";
+    }
+}
+
+class Timer {
+    has Int $!end-time;
+    has TimerDisplay $!display handles 'finish';
+
+    submethod BUILD(Int :$seconds!, TimerDisplay :$!display!) {
+        $!end-time = time + $seconds;
+    }
+
+    method parse(Str $time-spec, TimerDisplay $display) returns Timer {
+        # we need the Cursor bit here to get around a Rakudo bug =(
+        my regex hours(Cursor:) {
+            $<value>=(\d+)h
+        }
+        my regex minutes(Cursor:) {
+            $<value>=(\d+)m
+        }
+        my regex seconds(Cursor:) {
+            $<value>=(\d+)s?
+        }
+        my regex timespec(Cursor:) {
+            <hours>?
+            <minutes>?
+            <seconds>?
+        }
+
+        if $time-spec ~~ /^<timespec>$/ {
+            my ( $hours, $minutes, $seconds ) = map({
+                my $value = $<timespec>{$_}[0]<value>;
+                $value ~~ Match ?? $value.Int !! 0
+            }, <hours minutes seconds>);
+
+            $seconds = ($hours * 3_600) + ($minutes * 60) + $seconds;
+            Timer.new(:$seconds, :$display);
+        } else {
+            die 'Failed to parse timespec!';
+        }
+    }
+
+    method update {
+        $!display.update($!end-time - time);
+    }
+
+    method is-running returns Bool {
+        return time < $!end-time;
+    }
+}
+
+sub MAIN(Cool $time) {
+    my Timer $timer .= parse(~$time, TimerDisplay.new);
+    LEAVE {
+        $timer.finish;
+    }
+
+    while $timer.is-running {
+        $timer.update;
+        sleep 1;
+    }
+    $timer.update;
+}
