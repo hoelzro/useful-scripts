@@ -1,4 +1,4 @@
 #!/bin/bash
 
 firefox "$1"
-echo "awful.tag.viewonly(tags[mouse.screen][1])" | awesome-client
+echo "require('awful').tag.viewonly(tags[mouse.screen][1])" | awesome-client
