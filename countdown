@@ -48,7 +48,7 @@ class Timer {
 
         if $time-spec ~~ /^<timespec>$/ {
             my ( $hours, $minutes, $seconds ) = map({
-                my $value = $<timespec>{$_}[0]<value>;
+                my $value = $<timespec>{$_}<value>;
                 $value ~~ Match ?? $value.Int !! 0
             }, <hours minutes seconds>);
 
