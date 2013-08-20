@@ -4,19 +4,16 @@ use 5.14.0;
 use autodie;
 use warnings;
 
-use File::Which;
-use MP3::Tag;
-
 sub convert_to_ogg {
-    my ( $mp3, $ogg, %metadata ) = @_;
+    my ( $input, $ogg, %metadata ) = @_;
 
     my ( $read, $write );
 
     pipe($read, $write);
 
-    my $mp3_pid = fork();
+    my $input_pid = fork();
 
-    if($mp3_pid) {
+    if($input_pid) {
         close $write;
         my $ogg_pid = fork();
 
@@ -42,7 +39,12 @@ sub convert_to_ogg {
         open STDOUT, '>&', $write;
         close STDERR;
         close STDIN;
-        exec 'lame', '--decode', $mp3, '-';
+
+        if($input =~ /[.]mp3$/) {
+            exec 'lame', '--decode', $input, '-';
+        } else {
+            exec 'flac', '--decode', '--silent', '--stdout', $input;
+        }
     }
 }
 
@@ -51,17 +53,41 @@ sub convert_to_ogg {
 die "usage: $0 [file.mp3]\n" unless @ARGV;
 
 my ( $input ) = @ARGV;
-my $mp3       = MP3::Tag->new($input);
+my $output;
 
-my ( $title,
-     $track,
-     $artist,
-     $album,
-     $comment,
-     $year,
-     $genre ) = $mp3->autoinfo();
+my ( $title, $track, $artist, $album, $comment, $year, $genre );
 
-my $output = $input =~ s/[.]mp3$/.ogg/r;
+if($input =~ /[.]mp3$/) {
+    require MP3::Tag;
+
+    my $mp3 = MP3::Tag->new($input);
+
+    ( $title,
+         $track,
+         $artist,
+         $album,
+         $comment,
+         $year,
+         $genre ) = $mp3->autoinfo();
+    $output = $input =~ s/[.]mp3$/.ogg/r;
+} elsif($input =~ /[.]flac$/) {
+    require Audio::FLAC::Header;
+
+    my $flac = Audio::FLAC::Header->new($input);
+    my $tags = $flac->tags;
+
+    ( $title,
+         $track,
+         $artist,
+         $album,
+         $comment,
+         $year,
+         $genre ) = @{$tags}{qw/TITLE TRACKNUMBER ARTIST ALBUM COMMENT DATE GENRE/};
+
+    $output = $input =~ s/[.]flac$/.ogg/r;
+} else {
+    die "Unrecognized file type for input '$input'\n";
+}
 
 if(-f $output) {
     die "'$output' already exists\n";
