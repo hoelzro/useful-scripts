@@ -9,21 +9,20 @@
 # that build ack.
 #
 
+package main;
+
 use strict;
 use warnings;
 
+our $VERSION = '2.11_02'; # Check http://beyondgrep.com/ for updates
+
 use 5.008008;
+use Getopt::Long 2.35 ();
+use Carp 1.04 ();
 
 
 # XXX Don't make this so brute force
 # See also: https://github.com/petdance/ack2/issues/89
-
-use Getopt::Long 2.35 ();
-
-use Carp 1.04 ();
-
-our $VERSION = '2.08';
-# Check http://beyondgrep.com/ for updates
 
 # These are all our globals.
 
@@ -36,19 +35,19 @@ MAIN: {
 
     # Do preliminary arg checking;
     my $env_is_usable = 1;
-    for ( @ARGV ) {
-        last if ( $_ eq '--' );
+    for my $arg ( @ARGV ) {
+        last if ( $arg eq '--' );
 
         # Get the --thpppt, --bar, --cathy checking out of the way.
-        /^--th[pt]+t+$/ && App::Ack::_thpppt($_);
-        /^--bar$/ && App::Ack::_bar();
-        /^--cathy$/ && App::Ack::_cathy();
+        $arg =~ /^--th[pt]+t+$/ and App::Ack::_thpppt($arg);
+        $arg eq '--bar'         and App::Ack::_bar();
+        $arg eq '--cathy'       and App::Ack::_cathy();
 
         # See if we want to ignore the environment. (Don't tell Al Gore.)
-        if ( /^--(no)?env$/ ) {
-            $env_is_usable = defined $1 ? 0 : 1;
-        }
+        $arg eq '--env'         and $env_is_usable = 1;
+        $arg eq '--noenv'       and $env_is_usable = 0;
     }
+
     if ( !$env_is_usable ) {
         my @keys = ( 'ACKRC', grep { /^ACK_/ } keys %ENV );
         delete @ENV{@keys};
@@ -111,22 +110,32 @@ sub _compile_file_filter {
     my $ifiles = $opt->{ifiles};
     $ifiles  ||= [];
 
-    my @ifiles_filters = map {
-        my $filter;
-
-        if ( /^(\w+):(.+)/ ) {
+    my $ifiles_filters = App::Ack::Filter::Collection->new();
+    
+    foreach my $filter_spec (@{$ifiles}) {
+        if ( $filter_spec =~ /^(\w+):(.+)/ ) {
             my ($how,$what) = ($1,$2);
-            $filter = App::Ack::Filter->create_filter($how, split(/,/, $what));
+            my $filter = App::Ack::Filter->create_filter($how, split(/,/, $what));
+            $ifiles_filters->add($filter);
         }
         else {
-            Carp::croak( qq{Invalid filter specification "$_"} );
+            Carp::croak( qq{Invalid filter specification "$filter_spec"} );
         }
-        $filter
-    } @{$ifiles};
+    }
 
     my $filters         = $opt->{'filters'} || [];
-    my $inverse_filters = [ grep {  $_->is_inverted() } @{$filters} ];
-    @{$filters}         =   grep { !$_->is_inverted() } @{$filters};
+    my $direct_filters = App::Ack::Filter::Collection->new();
+    my $inverse_filters = App::Ack::Filter::Collection->new();
+
+    foreach my $filter (@{$filters}) {
+        if ($filter->is_inverted()) {
+            # We want to check if files match the uninverted filters
+            $inverse_filters->add($filter->invert());
+        }
+        else {
+            $direct_filters->add($filter);
+        }
+    }
 
     my %is_member_of_starting_set = map { (get_file_id($_) => 1) } @{$start};
 
@@ -200,28 +209,15 @@ sub _compile_file_filter {
 
         my $resource = App::Ack::Resource::Basic->new($File::Next::name);
         return 0 if ! $resource;
-        foreach my $filter (@ifiles_filters) {
-            return 0 if $filter->filter($resource);
+        if ( $ifiles_filters->filter($resource) ) {
+            return 0;
         }
-        my $match_found = 1;
-        if ( @{$filters} ) {
-            $match_found = 0;
 
-            foreach my $filter (@{$filters}) {
-                if ($filter->filter($resource)) {
-                    $match_found = 1;
-                    last;
-                }
-            }
-        }
+        my $match_found = $direct_filters->filter($resource);
+
         # Don't bother invoking inverse filters unless we consider the current resource a match
-        if ( $match_found && @{$inverse_filters} ) {
-            foreach my $filter ( @{$inverse_filters} ) {
-                if ( not $filter->filter( $resource ) ) {
-                    $match_found = 0;
-                    last;
-                }
-            }
+        if ( $match_found && $inverse_filters->filter( $resource ) ) {
+            $match_found = 0;
         }
         return $match_found;
     };
@@ -251,7 +247,6 @@ sub load_colors {
     return;
 }
 
-# inefficient, but functional
 sub filetypes {
     my ( $resource ) = @_;
 
@@ -270,12 +265,14 @@ sub filetypes {
         }
     }
 
-    return sort @matches;
+    # http://search.cpan.org/dist/Perl-Critic/lib/Perl/Critic/Policy/Subroutines/ProhibitReturnSort.pm
+    @matches = sort @matches;
+    return @matches;
 }
 
-# returns a (fairly) unique identifier for a file
-# use this function to compare two files to see if they're
-# equal (ie. the same file, but with a different path/links/etc)
+# Returns a (fairly) unique identifier for a file.
+# Use this function to compare two files to see if they're
+# equal (ie. the same file, but with a different path/links/etc).
 sub get_file_id {
     my ( $filename ) = @_;
 
@@ -711,6 +708,8 @@ sub print_line_with_context {
                 }
 
                 chomp $line;
+                local $opt->{column};
+
                 print_line_with_options($opt, $filename, $line, $context_line_no, '-');
                 $previous_line_printed = $context_line_no;
                 $offset--;
@@ -736,8 +735,14 @@ sub print_line_with_context {
                 next;
             }
             chomp $line;
-            my $separator = ($opt->{regex} && does_match( $opt, $line )) ? ':' : '-';
-            print_line_with_options($opt, $filename, $line, $. + $offset, $separator);
+
+            if ( $opt->{regex} && does_match( $opt, $line ) ) {
+                print_line_with_options($opt, $filename, $line, $. + $offset, ':');
+            }
+            else {
+                local $opt->{column};
+                print_line_with_options($opt, $filename, $line, $. + $offset, '-');
+            }
             $previous_line_printed = $. + $offset;
             $offset++;
         }
@@ -843,7 +848,7 @@ sub main {
         $| = 1;
     }
 
-    if ( not defined $opt->{color} ) {
+    if ( !defined($opt->{color}) && !$opt->{g} ) {
         my $windows_color = 1;
         if ( $App::Ack::is_windows ) {
             $windows_color = eval { require Win32::Console::ANSI; }
@@ -944,7 +949,9 @@ RESOURCES:
                     show_types( $resource, $ors );
                 }
                 else {
-                    App::Ack::print( $resource->name, $ors );
+                    local $opt->{show_filename} = 0;
+
+                    print_line_with_options($opt, '', $resource->name, 0, $ors);
                 }
                 ++$nmatches;
                 last RESOURCES if defined($max_count) && $nmatches >= $max_count;
@@ -1224,6 +1231,8 @@ This is off by default.
 =item B<-g I<PATTERN>>
 
 Print files where the relative path + filename matches I<PATTERN>.
+This option can be combined with B<--color> to make it easier to spot
+the match.
 
 =item B<--[no]group>
 
@@ -2162,6 +2171,10 @@ L<https://github.com/petdance/ack2>
 How appropriate to have I<ack>nowledgements!
 
 Thanks to everyone who has contributed to ack in any way, including
+Stephan Hohe,
+Michael Beijen,
+Alexandr Ciornii,
+Christian Walde,
 Charles Lee,
 Joe McMahon,
 John Warwick,
@@ -2256,233 +2269,6 @@ See http://www.perlfoundation.org/artistic_license_2_0 or the LICENSE.md
 file that comes with the ack distribution.
 
 =cut
-package File::Next;
-
-use strict;
-use warnings;
-
-
-our $VERSION = '1.10';
-
-
-
-use File::Spec ();
-
-our $name; # name of the current file
-our $dir;  # dir of the current file
-
-our %files_defaults;
-our %skip_dirs;
-
-BEGIN {
-    %files_defaults = (
-        file_filter     => undef,
-        descend_filter  => undef,
-        error_handler   => sub { CORE::die @_ },
-        warning_handler => sub { CORE::warn @_ },
-        sort_files      => undef,
-        follow_symlinks => 1,
-        nul_separated   => 0,
-    );
-    %skip_dirs = map {($_,1)} (File::Spec->curdir, File::Spec->updir);
-}
-
-
-sub files {
-    die _bad_invocation() if @_ && defined($_[0]) && ($_[0] eq __PACKAGE__);
-
-    my ($parms,@queue) = _setup( \%files_defaults, @_ );
-    my $filter = $parms->{file_filter};
-
-    return sub {
-        while (@queue) {
-            my ($dirname,$file,$fullpath) = splice( @queue, 0, 3 );
-            if ( -f $fullpath || -p $fullpath ) {
-                if ( $filter ) {
-                    local $_ = $file;
-                    local $File::Next::dir = $dirname;
-                    local $File::Next::name = $fullpath;
-                    next if not $filter->();
-                }
-                return wantarray ? ($dirname,$file,$fullpath) : $fullpath;
-            }
-            elsif ( -d _ ) {
-                unshift( @queue, _candidate_files( $parms, $fullpath ) );
-            }
-        } # while
-
-        return;
-    }; # iterator
-}
-
-
-
-
-
-
-sub from_file {
-    die _bad_invocation() if @_ && defined($_[0]) && ($_[0] eq __PACKAGE__);
-
-    my ($parms,@queue) = _setup( \%files_defaults, @_ );
-    my $err  = $parms->{error_handler};
-    my $warn = $parms->{error_handler};
-
-    my $filename = $queue[1];
-
-    if ( !defined($filename) ) {
-        $err->( 'Must pass a filename to from_file()' );
-        return undef;
-    }
-
-    my $fh;
-    if ( $filename eq '-' ) {
-        $fh = \*STDIN;
-    }
-    else {
-        if ( !open( $fh, '<', $filename ) ) {
-            $err->( "Unable to open $filename: $!" );
-            return undef;
-        }
-    }
-    my $filter = $parms->{file_filter};
-
-    return sub {
-        local $/ = $parms->{nul_separated} ? "\x00" : $/;
-        while ( my $fullpath = <$fh> ) {
-            chomp $fullpath;
-            next unless $fullpath =~ /./;
-            if ( not ( -f $fullpath || -p _ ) ) {
-                $warn->( "$fullpath: No such file" );
-                next;
-            }
-
-            my ($volume,$dirname,$file) = File::Spec->splitpath( $fullpath );
-            if ( $filter ) {
-                local $_ = $file;
-                local $File::Next::dir  = $dirname;
-                local $File::Next::name = $fullpath;
-                next if not $filter->();
-            }
-            return wantarray ? ($dirname,$file,$fullpath) : $fullpath;
-        } # while
-        close $fh;
-
-        return;
-    }; # iterator
-}
-
-sub _bad_invocation {
-    my $good = (caller(1))[3];
-    my $bad  = $good;
-    $bad =~ s/(.+)::/$1->/;
-    return "$good must not be invoked as $bad";
-}
-
-sub sort_standard($$)   { return $_[0]->[1] cmp $_[1]->[1] }
-sub sort_reverse($$)    { return $_[1]->[1] cmp $_[0]->[1] }
-
-sub reslash {
-    my $path = shift;
-
-    my @parts = split( /\//, $path );
-
-    return $path if @parts < 2;
-
-    return File::Spec->catfile( @parts );
-}
-
-
-
-sub _setup {
-    my $defaults = shift;
-    my $passed_parms = ref $_[0] eq 'HASH' ? {%{+shift}} : {}; # copy parm hash
-
-    my %passed_parms = %{$passed_parms};
-
-    my $parms = {};
-    for my $key ( keys %{$defaults} ) {
-        $parms->{$key} =
-            exists $passed_parms{$key}
-                ? delete $passed_parms{$key}
-                : $defaults->{$key};
-    }
-
-    # Any leftover keys are bogus
-    for my $badkey ( keys %passed_parms ) {
-        my $sub = (caller(1))[3];
-        $parms->{error_handler}->( "Invalid option passed to $sub(): $badkey" );
-    }
-
-    # If it's not a code ref, assume standard sort
-    if ( $parms->{sort_files} && ( ref($parms->{sort_files}) ne 'CODE' ) ) {
-        $parms->{sort_files} = \&sort_standard;
-    }
-    my @queue;
-
-    for ( @_ ) {
-        my $start = reslash( $_ );
-        if (-d $start) {
-            push @queue, ($start,undef,$start);
-        }
-        else {
-            push @queue, (undef,$start,$start);
-        }
-    }
-
-    return ($parms,@queue);
-}
-
-
-sub _candidate_files {
-    my $parms   = shift;
-    my $dirname = shift;
-
-    my $dh;
-    if ( !opendir $dh, $dirname ) {
-        $parms->{error_handler}->( "$dirname: $!" );
-        return;
-    }
-
-    my @newfiles;
-    my $descend_filter = $parms->{descend_filter};
-    my $follow_symlinks = $parms->{follow_symlinks};
-    my $sort_sub = $parms->{sort_files};
-
-    for my $file ( grep { !exists $skip_dirs{$_} } readdir $dh ) {
-        my $has_stat;
-
-        # Only do directory checking if we have a descend_filter
-        my $fullpath = File::Spec->catdir( $dirname, $file );
-        if ( !$follow_symlinks ) {
-            next if -l $fullpath;
-            $has_stat = 1;
-        }
-
-        if ( $descend_filter ) {
-            if ( $has_stat ? (-d _) : (-d $fullpath) ) {
-                local $File::Next::dir = $fullpath;
-                local $_ = $file;
-                next if not $descend_filter->();
-            }
-        }
-        if ( $sort_sub ) {
-            push( @newfiles, [ $dirname, $file, $fullpath ] );
-        }
-        else {
-            push( @newfiles, $dirname, $file, $fullpath );
-        }
-    }
-    closedir $dh;
-
-    if ( $sort_sub ) {
-        return map { @{$_} } sort $sort_sub @newfiles;
-    }
-
-    return @newfiles;
-}
-
-
-1; # End of File::Next
 package App::Ack;
 
 use warnings;
@@ -2493,9 +2279,9 @@ our $VERSION;
 our $GIT_REVISION;
 our $COPYRIGHT;
 BEGIN {
-    $VERSION = '2.08';
+    $VERSION = '2.11_02';
     $COPYRIGHT = 'Copyright 2005-2013 Andy Lester.';
-    $GIT_REVISION = q{0c5f694};
+    $GIT_REVISION = q{dcff932};
 }
 
 our $fh;
@@ -2525,7 +2311,7 @@ BEGIN {
     $is_filter_mode = -p STDIN;
 
     $is_cygwin       = ($^O eq 'cygwin');
-    $is_windows      = ($^O =~ /MSWin32/);
+    $is_windows      = ($^O eq 'MSWin32');
     $dir_sep_chars   = $is_windows ? quotemeta( '\\/' ) : quotemeta( File::Spec->catfile( '', '' ) );
 }
 
@@ -3270,323 +3056,327 @@ sub open {
 }
 
 1;
-package App::Ack::Filter;
+package App::Ack::ConfigDefault;
 
-use strict;
 use warnings;
-use overload
-    '""' => 'to_string';
-
-use Carp 1.04 ();
-
-my %filter_types;
-
-
-sub create_filter {
-    my ( undef, $type, @args ) = @_;
-
-    if ( my $package = $filter_types{$type} ) {
-        return $package->new(@args);
-    }
-    Carp::croak "Unknown filter type '$type'";
-}
-
-
-sub register_filter {
-    my ( undef, $type, $package ) = @_;
-
-    $filter_types{$type} = $package;
-
-    return;
-}
-
-
-sub invert {
-    my ( $self ) = @_;
-
-    return App::Ack::Filter::Inverse->new( $self );
-}
-
-
-sub is_inverted {
-    return 0;
-}
-
-
-sub to_string {
-    my ( $self ) = @_;
-
-    return '(unimplemented to_string)';
-}
-
-
-sub inspect {
-    my ( $self ) = @_;
-
-    return ref($self);
-}
-
-1;
-package App::Ack::Filter::Extension;
-
 use strict;
-use warnings;
-BEGIN {
-    our @ISA = 'App::Ack::Filter';
+
+sub options {
+    my @options = split( /\n/, _options_block() );
+    @options = grep { /./ && !/^#/ } @options;
+
+    return @options;
 }
 
-sub new {
-    my ( $class, @extensions ) = @_;
+sub _options_block {
+    return <<'HERE';
+# This is the default ackrc for ack 2.0
 
-    my $exts = join('|', map { "\Q$_\E"} @extensions);
-    my $re   = qr/[.](?:$exts)$/i;
+# There are four different ways to match
+#
+# is:  Match the filename exactly
+#
+# ext: Match the extension of the filename exactly
+#
+# match: Match the filename against a Perl regular expression
+#
+# firstlinematch: Match the first 250 characters of the first line
+#   of text against a Perl regular expression.  This is only for
+#   the --type-add option.
 
-    return bless {
-        extensions => \@extensions,
-        regex      => $re,
-    }, $class;
-}
 
-sub filter {
-    my ( $self, $resource ) = @_;
+### Directories to ignore
 
-    my $re = $self->{'regex'};
+# Bazaar
+--ignore-directory=is:.bzr
 
-    return $resource->name =~ /$re/;
-}
+# Codeville
+--ignore-directory=is:.cdv
 
-sub inspect {
-    my ( $self ) = @_;
+# Interface Builder
+--ignore-directory=is:~.dep
+--ignore-directory=is:~.dot
+--ignore-directory=is:~.nib
+--ignore-directory=is:~.plst
 
-    my $re = $self->{'regex'};
+# Git
+--ignore-directory=is:.git
 
-    return ref($self) . " - $re";
-}
+# Mercurial
+--ignore-directory=is:.hg
 
-sub to_string {
-    my ( $self ) = @_;
+# quilt
+--ignore-directory=is:.pc
 
-    my $exts = $self->{'extensions'};
+# Subversion
+--ignore-directory=is:.svn
 
-    return join(' ', map { ".$_" } @{$exts});
-}
+# Monotone
+--ignore-directory=is:_MTN
 
-BEGIN {
-    App::Ack::Filter->register_filter(ext => __PACKAGE__);
-}
+# CVS
+--ignore-directory=is:CVS
 
-1;
-package App::Ack::Filter::FirstLineMatch;
+# RCS
+--ignore-directory=is:RCS
 
-use strict;
-use warnings;
-BEGIN {
-    our @ISA = 'App::Ack::Filter';
-}
+# SCCS
+--ignore-directory=is:SCCS
 
-sub new {
-    my ( $class, $re ) = @_;
+# darcs
+--ignore-directory=is:_darcs
 
-    $re =~ s{^/|/$}{}g; # XXX validate?
-    $re = qr{$re}i;
+# Vault/Fortress
+--ignore-directory=is:_sgbak
 
-    return bless {
-        regex => $re,
-    }, $class;
-}
+# autoconf
+--ignore-directory=is:autom4te.cache
 
-# This test reads the first 250 characters of a file, then just uses the
-# first line found in that. This prevents reading something  like an entire
-# .min.js file (which might be only one "line" long) into memory.
+# Perl module building
+--ignore-directory=is:blib
+--ignore-directory=is:_build
 
-sub filter {
-    my ( $self, $resource ) = @_;
+# Perl Devel::Cover module's output directory
+--ignore-directory=is:cover_db
 
-    my $re = $self->{'regex'};
+# Node modules created by npm
+--ignore-directory=is:node_modules
 
-    my $line = $resource->firstliney;
+# CMake cache
+--ignore-directory=is:CMakeFiles
 
-    return $line =~ /$re/;
-}
+### Files to ignore
 
-sub inspect {
-    my ( $self ) = @_;
+# Backup files
+--ignore-file=ext:bak
+--ignore-file=match:/~$/
 
-    my $re = $self->{'regex'};
+# Emacs swap files
+--ignore-file=match:/^#.+#$/
 
-    return ref($self) . " - $re";
-}
+# vi/vim swap files
+--ignore-file=match:/[._].*\.swp$/
 
-sub to_string {
-    my ( $self ) = @_;
+# core dumps
+--ignore-file=match:/core\.\d+$/
 
-    (my $re = $self->{regex}) =~ s{\([^:]*:(.*)\)$}{$1};
+# minified Javascript
+--ignore-file=match:/[.-]min[.]js$/
+--ignore-file=match:/[.]js[.]min$/
 
-    return "first line matches /$re/";
-}
+# minified CSS
+--ignore-file=match:/[.]min[.]css$/
+--ignore-file=match:/[.]css[.]min$/
 
-BEGIN {
-    App::Ack::Filter->register_filter(firstlinematch => __PACKAGE__);
-}
+# PDFs, because they pass Perl's -T detection
+--ignore-file=ext:pdf
 
-1;
-package App::Ack::Filter::Is;
+# Common graphics, just as an optimization
+--ignore-file=ext:gif,jpg,jpeg,png
 
-use strict;
-use warnings;
-BEGIN {
-    our @ISA = 'App::Ack::Filter';
-}
 
-use File::Spec 3.00 ();
+### Filetypes defined
 
-sub new {
-    my ( $class, $filename ) = @_;
+# Perl http://perl.org/
+--type-add=perl:ext:pl,pm,pod,t,psgi
+--type-add=perl:firstlinematch:/^#!.*\bperl/
 
-    return bless {
-        filename => $filename,
-    }, $class;
-}
+# Perl tests
+--type-add=perltest:ext:t
 
-sub filter {
-    my ( $self, $resource ) = @_;
+# Makefiles http://www.gnu.org/s/make/
+--type-add=make:ext:mk
+--type-add=make:ext:mak
+--type-add=make:is:makefile
+--type-add=make:is:Makefile
+--type-add=make:is:GNUmakefile
 
-    my $filename = $self->{'filename'};
-    my $base     = (File::Spec->splitpath($resource->name))[2];
+# Rakefiles http://rake.rubyforge.org/
+--type-add=rake:is:Rakefile
 
-    return $base eq $filename;
-}
+# CMake http://www.cmake.org/
+--type-add=cmake:is:CMakeLists.txt
+--type-add=cmake:ext:cmake
 
-sub inspect {
-    my ( $self ) = @_;
+# Actionscript
+--type-add=actionscript:ext:as,mxml
 
-    my $filename = $self->{'filename'};
+# Ada http://www.adaic.org/
+--type-add=ada:ext:ada,adb,ads
 
-    return ref($self) . " - $filename";
-}
+# ASP http://msdn.microsoft.com/en-us/library/aa286483.aspx
+--type-add=asp:ext:asp
 
-sub to_string {
-    my ( $self ) = @_;
+# ASP.Net http://www.asp.net/
+--type-add=aspx:ext:master,ascx,asmx,aspx,svc
 
-    my $filename = $self->{'filename'};
-}
+# Assembly
+--type-add=asm:ext:asm,s
 
-BEGIN {
-    App::Ack::Filter->register_filter(is => __PACKAGE__);
-}
+# Batch
+--type-add=batch:ext:bat,cmd
 
-1;
-package App::Ack::Filter::Match;
+# ColdFusion http://en.wikipedia.org/wiki/ColdFusion
+--type-add=cfmx:ext:cfc,cfm,cfml
 
-use strict;
-use warnings;
-BEGIN {
-    our @ISA = 'App::Ack::Filter';
-}
+# Clojure http://clojure.org/
+--type-add=clojure:ext:clj
 
-use File::Spec 3.00;
+# C
+# .xs are Perl C files
+--type-add=cc:ext:c,h,xs
 
-sub new {
-    my ( $class, $re ) = @_;
+# C header files
+--type-add=hh:ext:h
 
-    $re =~ s{^/|/$}{}g; # XXX validate?
-    $re = qr/$re/i;
+# CoffeeScript http://coffeescript.org/
+--type-add=coffeescript:ext:coffee
 
-    return bless {
-        regex => $re,
-    }, $class;
-}
+# C++
+--type-add=cpp:ext:cpp,cc,cxx,m,hpp,hh,h,hxx
 
-sub filter {
-    my ( $self, $resource ) = @_;
+# C#
+--type-add=csharp:ext:cs
 
-    my $re   = $self->{'regex'};
-    my $base = (File::Spec->splitpath($resource->name))[2];
+# CSS http://www.w3.org/Style/CSS/
+--type-add=css:ext:css
 
-    return $base =~ /$re/;
-}
+# Dart http://www.dartlang.org/
+--type-add=dart:ext:dart
 
-sub inspect {
-    my ( $self ) = @_;
+# Delphi http://en.wikipedia.org/wiki/Embarcadero_Delphi
+--type-add=delphi:ext:pas,int,dfm,nfm,dof,dpk,dproj,groupproj,bdsgroup,bdsproj
 
-    my $re = $self->{'regex'};
+# Elixir http://elixir-lang.org/
+--type-add=elixir:ext:ex,exs
 
-    print ref($self) . " - $re";
-}
+# Emacs Lisp http://www.gnu.org/software/emacs
+--type-add=elisp:ext:el
 
-sub to_string {
-    my ( $self ) = @_;
+# Erlang http://www.erlang.org/
+--type-add=erlang:ext:erl,hrl
 
-    my $re = $self->{'regex'};
+# Fortran http://en.wikipedia.org/wiki/Fortran
+--type-add=fortran:ext:f,f77,f90,f95,f03,for,ftn,fpp
 
-    return "filename matches $re";
-}
+# Google Go http://golang.org/
+--type-add=go:ext:go
 
-BEGIN {
-    App::Ack::Filter->register_filter(match => __PACKAGE__);
-}
+# Groovy http://groovy.codehaus.org/
+--type-add=groovy:ext:groovy,gtmpl,gpp,grunit,gradle
 
-1;
-package App::Ack::Filter::Default;
+# Haskell http://www.haskell.org/
+--type-add=haskell:ext:hs,lhs
 
-use strict;
-use warnings;
-BEGIN {
-    our @ISA = 'App::Ack::Filter';
-}
+# HTML
+--type-add=html:ext:htm,html
 
-sub new {
-    my ( $class ) = @_;
+# Java http://www.oracle.com/technetwork/java/index.html
+--type-add=java:ext:java,properties
 
-    return bless {}, $class;
-}
+# JavaScript
+--type-add=js:ext:js
 
-sub filter {
-    my ( $self, $resource ) = @_;
+# JSP http://www.oracle.com/technetwork/java/javaee/jsp/index.html
+--type-add=jsp:ext:jsp,jspx,jhtm,jhtml
 
-    return -T $resource->name;
-}
+# JSON http://www.json.org/
+--type-add=json:ext:json
 
-1;
-package App::Ack::Filter::Inverse;
+# Less http://www.lesscss.org/
+--type-add=less:ext:less
 
-use strict;
-use warnings;
-BEGIN {
-    our @ISA = 'App::Ack::Filter';
-}
+# Common Lisp http://common-lisp.net/
+--type-add=lisp:ext:lisp,lsp
 
-sub new {
-    my ( $class, $filter ) = @_;
+# Lua http://www.lua.org/
+--type-add=lua:ext:lua
+--type-add=lua:firstlinematch:/^#!.*\blua(jit)?/
 
-    return bless {
-        filter => $filter,
-    }, $class;
-}
+# Objective-C
+--type-add=objc:ext:m,h
 
-sub filter {
-    my ( $self, $resource ) = @_;
+# Objective-C++
+--type-add=objcpp:ext:mm,h
 
-    my $filter = $self->{'filter'};
-    return !$filter->filter( $resource );
-}
+# OCaml http://caml.inria.fr/
+--type-add=ocaml:ext:ml,mli
 
-sub invert {
-    my $self = shift;
+# Matlab http://en.wikipedia.org/wiki/MATLAB
+--type-add=matlab:ext:m
 
-    return $self->{'filter'};
-}
+# Parrot http://www.parrot.org/
+--type-add=parrot:ext:pir,pasm,pmc,ops,pod,pg,tg
 
-sub is_inverted {
-    return 1;
-}
+# PHP http://www.php.net/
+--type-add=php:ext:php,phpt,php3,php4,php5,phtml
+--type-add=php:firstlinematch:/^#!.*\bphp/
 
-sub inspect {
-    my ( $self ) = @_;
+# Plone http://plone.org/
+--type-add=plone:ext:pt,cpt,metadata,cpy,py
 
-    my $filter = $self->{'filter'};
+# Python http://www.python.org/
+--type-add=python:ext:py
+--type-add=python:firstlinematch:/^#!.*\bpython/
 
-    return "!$filter";
+# R http://www.r-project.org/
+--type-add=rr:ext:R
+
+# Ruby http://www.ruby-lang.org/
+--type-add=ruby:ext:rb,rhtml,rjs,rxml,erb,rake,spec
+--type-add=ruby:is:Rakefile
+--type-add=ruby:firstlinematch:/^#!.*\bruby/
+
+# Rust http://www.rust-lang.org/
+--type-add=rust:ext:rs
+
+# Sass http://sass-lang.com
+--type-add=sass:ext:sass,scss
+
+# Scala http://www.scala-lang.org/
+--type-add=scala:ext:scala
+
+# Scheme http://groups.csail.mit.edu/mac/projects/scheme/
+--type-add=scheme:ext:scm,ss
+
+# Shell
+--type-add=shell:ext:sh,bash,csh,tcsh,ksh,zsh,fish
+--type-add=shell:firstlinematch:/^#!.*\b(?:ba|t?c|k|z|fi)?sh\b/
+
+# Smalltalk http://www.smalltalk.org/
+--type-add=smalltalk:ext:st
+
+# SQL http://www.iso.org/iso/catalogue_detail.htm?csnumber=45498
+--type-add=sql:ext:sql,ctl
+
+# Tcl http://www.tcl.tk/
+--type-add=tcl:ext:tcl,itcl,itk
+
+# LaTeX http://www.latex-project.org/
+--type-add=tex:ext:tex,cls,sty
+
+# Template Toolkit http://template-toolkit.org/
+--type-add=tt:ext:tt,tt2,ttml
+
+# Visual Basic
+--type-add=vb:ext:bas,cls,frm,ctl,vb,resx
+
+# Verilog
+--type-add=verilog:ext:v,vh,sv
+
+# VHDL http://www.eda.org/twiki/bin/view.cgi/P1076/WebHome
+--type-add=vhdl:ext:vhd,vhdl
+
+# Vim http://www.vim.org/
+--type-add=vim:ext:vim
+
+# XML http://www.w3.org/TR/REC-xml/
+--type-add=xml:ext:xml,dtd,xsl,xslt,ent
+--type-add=xml:firstlinematch:/<[?]xml/
+
+# YAML http://yaml.org/
+--type-add=yaml:ext:yaml,yml
+HERE
 }
 
 1;
@@ -3599,15 +3389,11 @@ use warnings;
 use Cwd 3.00 ();
 use File::Spec 3.00;
 
-use if ($^O =~ /MSWin32/ ? 1 : 0), "Win32";
+use if ($^O eq 'MSWin32'), 'Win32';
 
-
-our $is_win = 0;
 
 sub new {
     my ( $class ) = @_;
-
-    $is_win = $^O =~ /MSWin32/,
 
     return bless {}, $class;
 }
@@ -3615,12 +3401,11 @@ sub new {
 sub _remove_redundancies {
     my ( @configs ) = @_;
 
-    if ( $is_win ) {
-        # inode stat always returns 0 on windows,
-        # so just check filenames
+    if ( $App::Ack::is_windows ) {
+        # inode stat always returns 0 on windows, so just check filenames.
         my (%seen, @uniq);
 
-        foreach my $path (@configs) {
+        foreach my $path (map { $_->{path} } @configs) {
             push @uniq, $path unless $seen{$path};
             $seen{$path} = 1;
         }
@@ -3632,12 +3417,13 @@ sub _remove_redundancies {
 
         my %dev_and_inode_seen;
 
-        foreach my $path ( @configs ) {
+        foreach my $config ( @configs ) {
+            my $path = $config->{path};
             my ( $dev, $inode ) = (stat $path)[0, 1];
 
             if( defined($dev) ) {
                 if( $dev_and_inode_seen{"$dev:$inode"} ) {
-                    undef $path;
+                    undef $config;
                 }
                 else {
                     $dev_and_inode_seen{"$dev:$inode"} = 1;
@@ -3668,29 +3454,29 @@ sub _check_for_ackrc {
 sub find_config_files {
     my @config_files;
 
-    if( $is_win ) {
-        push @config_files, map { File::Spec->catfile($_, 'ackrc') } (
+    if ( $App::Ack::is_windows ) {
+        push @config_files, map { +{ path => File::Spec->catfile($_, 'ackrc') } } (
             Win32::GetFolderPath(Win32::CSIDL_COMMON_APPDATA()),
             Win32::GetFolderPath(Win32::CSIDL_APPDATA()),
         );
     }
     else {
-        push @config_files, '/etc/ackrc';
+        push @config_files, { path => '/etc/ackrc' };
     }
 
 
     if ( $ENV{'ACKRC'} && -f $ENV{'ACKRC'} ) {
-        push @config_files, $ENV{'ACKRC'};
+        push @config_files, { path => $ENV{'ACKRC'} };
     }
     else {
-        push @config_files, _check_for_ackrc($ENV{'HOME'});
+        push @config_files, map { +{ path => $_ } } _check_for_ackrc($ENV{'HOME'});
     }
 
     my @dirs = File::Spec->splitdir(Cwd::getcwd());
     while(@dirs) {
         my $ackrc = _check_for_ackrc(@dirs);
         if(defined $ackrc) {
-            push @config_files, $ackrc;
+            push @config_files, { project => 1, path => $ackrc };
             last;
         }
         pop @dirs;
@@ -3792,13 +3578,13 @@ sub uninvert_filter {
 
     return unless defined $opt->{filters} && @filters;
 
-    # loop through all the registered filters
-    # If we hit one that matches this extension and it's inverted, we need
-    # to delete it from the options
+    # Loop through all the registered filters.  If we hit one that
+    # matches this extension and it's inverted, we need to delete it from
+    # the options.
     for ( my $i = 0; $i < @{ $opt->{filters} }; $i++ ) {
         my $opt_filter = @{ $opt->{filters} }[$i];
 
-        # XXX do a real list comparison? This just checks string equivalence
+        # XXX Do a real list comparison? This just checks string equivalence.
         if ( $opt_filter->is_inverted() && "$opt_filter->{filter}" eq "@filters" ) {
             splice @{ $opt->{filters} }, $i, 1;
             $i--;
@@ -3871,8 +3657,8 @@ sub process_filetypes {
         'type-del=s' => $delete_spec,
     );
 
-    for ( my $i = 0; $i < @{$arg_sources}; $i += 2) {
-        my ( $source_name, $args ) = @{$arg_sources}[ $i, $i + 1];
+    foreach my $source (@{$arg_sources}) {
+        my ( $source_name, $args ) = @{$source}{qw/name contents/};
 
         if ( ref($args) ) {
             # $args are modified in place, so no need to munge $arg_sources
@@ -3881,7 +3667,7 @@ sub process_filetypes {
             @{$args} = @ARGV;
         }
         else {
-            ( undef, $arg_sources->[$i + 1] ) =
+            ( undef, $source->{contents} ) =
                 Getopt::Long::GetOptionsFromString($args, %type_arg_specs);
         }
     }
@@ -4053,8 +3839,8 @@ sub process_other {
     my $argv_source;
     my $is_help_types_active;
 
-    for ( my $i = 0; $i < @{$arg_sources}; $i += 2 ) {
-        my ( $source_name, $args ) = @{$arg_sources}[ $i, $i + 1 ];
+    foreach my $source (@{$arg_sources}) {
+        my ( $source_name, $args ) = @{$source}{qw/name contents/};
 
         if ( $source_name eq 'ARGV' ) {
             $argv_source = $args;
@@ -4062,7 +3848,7 @@ sub process_other {
         }
     }
 
-    if ( $argv_source ) { # this *should* always be true, but you never know...
+    if ( $argv_source ) { # This *should* always be true, but you never know...
         my @copy = @{$argv_source};
         local @ARGV = @copy;
 
@@ -4077,18 +3863,36 @@ sub process_other {
 
     my $arg_specs = get_arg_spec($opt, $extra_specs);
 
-    for ( my $i = 0; $i < @{$arg_sources}; $i += 2) {
-        my ($source_name, $args) = @{$arg_sources}[$i, $i + 1];
+    foreach my $source (@{$arg_sources}) {
+        my ( $source_name, $args ) = @{$source}{qw/name contents/};
+
+        my $args_for_source = $arg_specs;
+
+        if ( $source->{project} ) {
+            my $illegal = sub {
+                my ( $option ) = @_;
+
+                return sub {
+                    die "Option $option is illegal in project ackrcs";
+                };
+            };
+
+            $args_for_source = { %$args_for_source,
+                'output=s'=> $illegal->('--output'),
+                'pager:s' => $illegal->('--pager'),
+                'match=s' => $illegal->('--match'),
+            };
+        }
 
         my $ret;
         if ( ref($args) ) {
             local @ARGV = @{$args};
-            $ret = Getopt::Long::GetOptions( %{$arg_specs} );
+            $ret = Getopt::Long::GetOptions( %{$args_for_source} );
             @{$args} = @ARGV;
         }
         else {
-            ( $ret, $arg_sources->[$i + 1] ) =
-                Getopt::Long::GetOptionsFromString( $args, %{$arg_specs} );
+            ( $ret, $source->{contents} ) =
+                Getopt::Long::GetOptionsFromString( $args, %{$args_for_source} );
         }
         if ( !$ret ) {
             if ( !$is_help_types_active ) {
@@ -4109,8 +3913,10 @@ sub process_other {
 sub should_dump_options {
     my ( $sources ) = @_;
 
-    for(my $i = 0; $i < @{$sources}; $i += 2) {
-        my ( $name, $options ) = @{$sources}[$i, $i + 1];
+
+    foreach my $source (@{$sources}) {
+        my ( $name, $options ) = @{$source}{qw/name contents/};
+
         if($name eq 'ARGV') {
             my $dump;
             local @ARGV = @{$options};
@@ -4154,10 +3960,10 @@ sub explode_sources {
         delete $arg_spec->{$arg};
     };
 
-    for(my $i = 0; $i < @{$sources}; $i += 2) {
-        my ( $name, $options ) = @{$sources}[$i, $i + 1];
+    foreach my $source (@{$sources}) {
+        my ( $name, $options ) = @{$source}{qw/name contents/};
         if ( ref($options) ne 'ARRAY' ) {
-            $sources->[$i + 1] = $options =
+            $source->{contents} = $options =
                 [ Text::ParseWords::shellwords($options) ];
         }
         for ( my $j = 0; $j < @{$options}; $j++ ) {
@@ -4175,7 +3981,10 @@ sub explode_sources {
             );
             Getopt::Long::GetOptions( %{$arg_spec} );
 
-            push @new_sources, $name, \@copy;
+            push @new_sources, {
+                name     => $name,
+                contents => \@copy,
+            };
         }
     }
 
@@ -4202,8 +4011,8 @@ sub dump_options {
     my %opts_by_source;
     my @source_names;
 
-    for(my $i = 0; $i < @{$sources}; $i += 2) {
-        my ( $name, $contents ) = @{$sources}[$i, $i + 1];
+    foreach my $source (@{$sources}) {
+        my ( $name, $contents ) = @{$source}{qw/name contents/};
         if ( not $opts_by_source{$name} ) {
             $opts_by_source{$name} = [];
             push @source_names, $name;
@@ -4228,7 +4037,7 @@ sub remove_default_options_if_needed {
     my $default_index;
 
     foreach my $index ( 0 .. $#$sources ) {
-        if ( $sources->[$index] eq 'Defaults' ) {
+        if ( $sources->[$index]{'name'} eq 'Defaults' ) {
             $default_index = $index;
             last;
         }
@@ -4238,17 +4047,16 @@ sub remove_default_options_if_needed {
 
     my $should_remove = 0;
 
-    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version'); # start with default options, minus some annoying ones
+    # Start with default options, minus some annoying ones.
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version');
     Getopt::Long::Configure(
         'no_ignore_case',
         'no_auto_abbrev',
         'pass_through',
     );
 
-    foreach my $index ( $default_index + 2 .. $#$sources ) {
-        next if $index % 2 != 0;
-
-        my ( $name, $args ) = @{$sources}[ $index, $index + 1 ];
+    foreach my $index ( $default_index + 1 .. $#$sources ) {
+        my ( $name, $args ) = @{$sources->[$index]}{qw/name contents/};
 
         if (ref($args)) {
             local @ARGV = @{$args};
@@ -4258,7 +4066,7 @@ sub remove_default_options_if_needed {
             @{$args} = @ARGV;
         }
         else {
-            ( undef, $sources->[$index + 1] ) = Getopt::Long::GetOptionsFromString($args,
+            ( undef, $sources->[$index]{contents} ) = Getopt::Long::GetOptionsFromString($args,
                 'ignore-ack-defaults' => \$should_remove,
             );
         }
@@ -4270,7 +4078,7 @@ sub remove_default_options_if_needed {
     return $sources unless $should_remove;
 
     my @copy = @{$sources};
-    splice @copy, $default_index, 2;
+    splice @copy, $default_index, 1;
     return \@copy;
 }
 
@@ -4294,7 +4102,8 @@ sub check_for_mutually_exclusive_options {
     while( @copy ) {
         my %set_opts;
 
-        my ( $source_name, $args ) = splice @copy, 0, 2;
+        my $source = shift @copy;
+        my ( $source_name, $args ) = @{$source}{qw/name contents/};
         $args = ref($args) ? [ @{$args} ] : [ Text::ParseWords::shellwords($args) ];
 
         foreach my $opt ( @{$args} ) {
@@ -4342,7 +4151,8 @@ sub process_args {
     my $type_specs = process_filetypes(\%opt, $arg_sources);
     process_other(\%opt, $type_specs, $arg_sources);
     while ( @{$arg_sources} ) {
-        my ( $source_name, $args ) = splice( @{$arg_sources}, 0, 2 );
+        my $source = shift @{$arg_sources};
+        my ( $source_name, $args ) = @{$source}{qw/name contents/};
 
         # All of our sources should be transformed into an array ref
         if ( ref($args) ) {
@@ -4359,7 +4169,7 @@ sub process_args {
     }
     my $filters = ($opt{filters} ||= []);
 
-    # throw the default filter in if no others are selected
+    # Throw the default filter in if no others are selected.
     if ( not grep { !$_->is_inverted() } @{$filters} ) {
         push @{$filters}, App::Ack::Filter::Default->new();
     }
@@ -4391,349 +4201,783 @@ sub retrieve_arg_sources {
         @files  = $finder->find_config_files;
     }
     if ( $ackrc ) {
-        # we explicitly use open so we get a nice error message
-        # XXX this is a potential race condition!
+        # We explicitly use open so we get a nice error message.
+        # XXX This is a potential race condition!.
         if(open my $fh, '<', $ackrc) {
             close $fh;
         }
         else {
             die "Unable to load ackrc '$ackrc': $!"
         }
-        push( @files, $ackrc );
+        push( @files, { path => $ackrc } );
     }
 
-    push @arg_sources, Defaults => [ App::Ack::ConfigDefault::options() ];
+    push @arg_sources, {
+        name     => 'Defaults',
+        contents => [ App::Ack::ConfigDefault::options() ],
+    };
 
     foreach my $file ( @files) {
-        my @lines = App::Ack::ConfigFinder::read_rcfile($file);
-        push ( @arg_sources, $file, \@lines ) if @lines;
+        my @lines = App::Ack::ConfigFinder::read_rcfile($file->{path});
+
+        if(@lines) {
+            push @arg_sources, {
+                name     => $file->{path},
+                contents => \@lines,
+                project  => $file->{project},
+            };
+        }
     }
 
     if ( $ENV{ACK_OPTIONS} && !$noenv ) {
-        push( @arg_sources, 'ACK_OPTIONS' => $ENV{ACK_OPTIONS} );
+        push @arg_sources, {
+            name     => 'ACK_OPTIONS',
+            contents => $ENV{ACK_OPTIONS},
+        };
     }
 
-    push( @arg_sources, 'ARGV' => [ @ARGV ] );
+    push @arg_sources, {
+        name     => 'ARGV',
+        contents => [ @ARGV ],
+    };
 
     return @arg_sources;
 }
 
 1; # End of App::Ack::ConfigLoader
-package App::Ack::ConfigDefault;
+package App::Ack::Filter;
 
-use warnings;
 use strict;
+use warnings;
+use overload
+    '""' => 'to_string';
 
-sub options {
-    my @options = split( /\n/, _options_block() );
-    @options = grep { /./ && !/^#/ } @options;
+use Carp 1.04 ();
 
-    return @options;
+my %filter_types;
+
+
+sub create_filter {
+    my ( undef, $type, @args ) = @_;
+
+    if ( my $package = $filter_types{$type} ) {
+        return $package->new(@args);
+    }
+    Carp::croak "Unknown filter type '$type'";
 }
 
-sub _options_block {
-    return <<'HERE';
-# This is the default ackrc for ack 2.0
 
-# There are four different ways to match
-#
-# is:  Match the filename exactly
-#
-# ext: Match the extension of the filename exactly
-#
-# match: Match the filename against a Perl regular expression
-#
-# firstlinematch: Match the first 250 characters of the first line
-#   of text against a Perl regular expression.  This is only for
-#   the --type-add option.
+sub register_filter {
+    my ( undef, $type, $package ) = @_;
 
+    $filter_types{$type} = $package;
 
-### Directories to ignore
+    return;
+}
 
-# Bazaar
---ignore-directory=is:.bzr
 
-# Codeville
---ignore-directory=is:.cdv
+sub invert {
+    my ( $self ) = @_;
 
-# Interface Builder
---ignore-directory=is:~.dep
---ignore-directory=is:~.dot
---ignore-directory=is:~.nib
---ignore-directory=is:~.plst
+    return App::Ack::Filter::Inverse->new( $self );
+}
 
-# Git
---ignore-directory=is:.git
 
-# Mercurial
---ignore-directory=is:.hg
+sub is_inverted {
+    return 0;
+}
 
-# quilt
---ignore-directory=is:.pc
 
-# Subversion
---ignore-directory=is:.svn
+sub to_string {
+    my ( $self ) = @_;
 
-# Monotone
---ignore-directory=is:_MTN
+    return '(unimplemented to_string)';
+}
 
-# CVS
---ignore-directory=is:CVS
 
-# RCS
---ignore-directory=is:RCS
+sub inspect {
+    my ( $self ) = @_;
 
-# SCCS
---ignore-directory=is:SCCS
-
-# darcs
---ignore-directory=is:_darcs
-
-# Vault/Fortress
---ignore-directory=is:_sgbak
-
-# autoconf
---ignore-directory=is:autom4te.cache
-
-# Perl module building
---ignore-directory=is:blib
---ignore-directory=is:_build
-
-# Perl Devel::Cover module's output directory
---ignore-directory=is:cover_db
-
-# Node modules created by npm
---ignore-directory=is:node_modules
-
-# CMake cache
---ignore-directory=is:CMakeFiles
-
-### Files to ignore
-
-# Backup files
---ignore-file=ext:bak
---ignore-file=match:/~$/
-
-# Emacs swap files
---ignore-file=match:/^#.+#$/
-
-# vi/vim swap files
---ignore-file=match:/[._].*\.swp$/
-
-# core dumps
---ignore-file=match:/core\.\d+$/
-
-# minified Javascript
---ignore-file=match:/[.-]min[.]js$/
---ignore-file=match:/[.]js[.]min$/
-
-# minified CSS
---ignore-file=match:/[.]min[.]css$/
---ignore-file=match:/[.]css[.]min$/
-
-# PDFs, because they pass Perl's -T detection
---ignore-file=ext:pdf
-
-# Common graphics, just as an optimization
---ignore-file=ext:gif,jpg,jpeg,png
-
-
-### Filetypes defined
-
-# Perl http://perl.org/
---type-add=perl:ext:pl,pm,pod,t,psgi
---type-add=perl:firstlinematch:/^#!.*\bperl/
-
-# Makefiles http://www.gnu.org/s/make/
---type-add=make:ext:mk
---type-add=make:ext:mak
---type-add=make:is:makefile
---type-add=make:is:Makefile
---type-add=make:is:GNUmakefile
-
-# Rakefiles http://rake.rubyforge.org/
---type-add=rake:is:Rakefile
-
-# CMake http://www.cmake.org/
---type-add=cmake:is:CMakeLists.txt
---type-add=cmake:ext:cmake
-
-# Actionscript
---type-add=actionscript:ext:as,mxml
-
-# Ada http://www.adaic.org/
---type-add=ada:ext:ada,adb,ads
-
-# ASP http://msdn.microsoft.com/en-us/library/aa286483.aspx
---type-add=asp:ext:asp
-
-# ASP.Net http://www.asp.net/
---type-add=aspx:ext:master,ascx,asmx,aspx,svc
-
-# Assembly
---type-add=asm:ext:asm,s
-
-# Batch
---type-add=batch:ext:bat,cmd
-
-# ColdFusion http://en.wikipedia.org/wiki/ColdFusion
---type-add=cfmx:ext:cfc,cfm,cfml
-
-# Clojure http://clojure.org/
---type-add=clojure:ext:clj
-
-# C
-# .xs are Perl C files
---type-add=cc:ext:c,h,xs
-
-# C header files
---type-add=hh:ext:h
-
-# CoffeeScript http://coffeescript.org/
---type-add=coffeescript:ext:coffee
-
-# C++
---type-add=cpp:ext:cpp,cc,cxx,m,hpp,hh,h,hxx
-
-# C#
---type-add=csharp:ext:cs
-
-# CSS http://www.w3.org/Style/CSS/
---type-add=css:ext:css
-
-# Dart http://www.dartlang.org/
---type-add=dart:ext:dart
-
-# Delphi http://en.wikipedia.org/wiki/Embarcadero_Delphi
---type-add=delphi:ext:pas,int,dfm,nfm,dof,dpk,dproj,groupproj,bdsgroup,bdsproj
-
-# Elixir http://elixir-lang.org/
---type-add=elixir:ext:ex,exs
-
-# Emacs Lisp http://www.gnu.org/software/emacs
---type-add=elisp:ext:el
-
-# Erlang http://www.erlang.org/
---type-add=erlang:ext:erl,hrl
-
-# Fortran http://en.wikipedia.org/wiki/Fortran
---type-add=fortran:ext:f,f77,f90,f95,f03,for,ftn,fpp
-
-# Google Go http://golang.org/
---type-add=go:ext:go
-
-# Groovy http://groovy.codehaus.org/
---type-add=groovy:ext:groovy,gtmpl,gpp,grunit,gradle
-
-# Haskell http://www.haskell.org/
---type-add=haskell:ext:hs,lhs
-
-# HTML
---type-add=html:ext:htm,html
-
-# Java http://www.oracle.com/technetwork/java/index.html
---type-add=java:ext:java,properties
-
-# JavaScript
---type-add=js:ext:js
-
-# JSP http://www.oracle.com/technetwork/java/javaee/jsp/index.html
---type-add=jsp:ext:jsp,jspx,jhtm,jhtml
-
-# JSON http://www.json.org/
---type-add=json:ext:json
-
-# Less http://www.lesscss.org/
---type-add=less:ext:less
-
-# Common Lisp http://common-lisp.net/
---type-add=lisp:ext:lisp,lsp
-
-# Lua http://www.lua.org/
---type-add=lua:ext:lua
---type-add=lua:firstlinematch:/^#!.*\blua(jit)?/
-
-# Objective-C
---type-add=objc:ext:m,h
-
-# Objective-C++
---type-add=objcpp:ext:mm,h
-
-# OCaml http://caml.inria.fr/
---type-add=ocaml:ext:ml,mli
-
-# Parrot http://www.parrot.org/
---type-add=parrot:ext:pir,pasm,pmc,ops,pod,pg,tg
-
-# PHP http://www.php.net/
---type-add=php:ext:php,phpt,php3,php4,php5,phtml
---type-add=php:firstlinematch:/^#!.*\bphp/
-
-# Plone http://plone.org/
---type-add=plone:ext:pt,cpt,metadata,cpy,py
-
-# Python http://www.python.org/
---type-add=python:ext:py
---type-add=python:firstlinematch:/^#!.*\bpython/
-
-# R http://www.r-project.org/
---type-add=rr:ext:R
-
-# Ruby http://www.ruby-lang.org/
---type-add=ruby:ext:rb,rhtml,rjs,rxml,erb,rake,spec
---type-add=ruby:is:Rakefile
---type-add=ruby:firstlinematch:/^#!.*\bruby/
-
-# Rust http://www.rust-lang.org/
---type-add=rust:ext:rs
-
-# Sass http://sass-lang.com
---type-add=sass:ext:sass,scss
-
-# Scala http://www.scala-lang.org/
---type-add=scala:ext:scala
-
-# Scheme http://groups.csail.mit.edu/mac/projects/scheme/
---type-add=scheme:ext:scm,ss
-
-# Shell
---type-add=shell:ext:sh,bash,csh,tcsh,ksh,zsh,fish
---type-add=shell:firstlinematch:/^#!.*\b(?:ba|t?c|k|z|fi)?sh\b/
-
-# Smalltalk http://www.smalltalk.org/
---type-add=smalltalk:ext:st
-
-# SQL http://www.iso.org/iso/catalogue_detail.htm?csnumber=45498
---type-add=sql:ext:sql,ctl
-
-# Tcl http://www.tcl.tk/
---type-add=tcl:ext:tcl,itcl,itk
-
-# LaTeX http://www.latex-project.org/
---type-add=tex:ext:tex,cls,sty
-
-# Template Toolkit http://template-toolkit.org/
---type-add=tt:ext:tt,tt2,ttml
-
-# Visual Basic
---type-add=vb:ext:bas,cls,frm,ctl,vb,resx
-
-# Verilog
---type-add=verilog:ext:v,vh,sv
-
-# VHDL http://www.eda.org/twiki/bin/view.cgi/P1076/WebHome
---type-add=vhdl:ext:vhd,vhdl
-
-# Vim http://www.vim.org/
---type-add=vim:ext:vim
-
-# XML http://www.w3.org/TR/REC-xml/
---type-add=xml:ext:xml,dtd,xsl,xslt,ent
---type-add=xml:firstlinematch:/<[?]xml/
-
-# YAML http://yaml.org/
---type-add=yaml:ext:yaml,yml
-HERE
+    return ref($self);
 }
 
 1;
+package App::Ack::Filter::Extension;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+
+sub new {
+    my ( $class, @extensions ) = @_;
+
+    my $exts = join('|', map { "\Q$_\E"} @extensions);
+    my $re   = qr/[.](?:$exts)$/i;
+
+    return bless {
+        extensions => \@extensions,
+        regex      => $re,
+        groupname  => 'ExtensionGroup',
+    }, $class;
+}
+
+sub create_group {
+    return App::Ack::Filter::ExtensionGroup->new();
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    my $re = $self->{'regex'};
+
+    return $resource->name =~ /$re/;
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    my $re = $self->{'regex'};
+
+    return ref($self) . " - $re";
+}
+
+sub to_string {
+    my ( $self ) = @_;
+
+    my $exts = $self->{'extensions'};
+
+    return join(' ', map { ".$_" } @{$exts});
+}
+
+BEGIN {
+    App::Ack::Filter->register_filter(ext => __PACKAGE__);
+}
+
+1;
+package App::Ack::Filter::FirstLineMatch;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+sub new {
+    my ( $class, $re ) = @_;
+
+    $re =~ s{^/|/$}{}g; # XXX validate?
+    $re = qr{$re}i;
+
+    return bless {
+        regex => $re,
+    }, $class;
+}
+
+# This test reads the first 250 characters of a file, then just uses the
+# first line found in that. This prevents reading something  like an entire
+# .min.js file (which might be only one "line" long) into memory.
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    my $re = $self->{'regex'};
+
+    my $line = $resource->firstliney;
+
+    return $line =~ /$re/;
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    my $re = $self->{'regex'};
+
+    return ref($self) . " - $re";
+}
+
+sub to_string {
+    my ( $self ) = @_;
+
+    (my $re = $self->{regex}) =~ s{\([^:]*:(.*)\)$}{$1};
+
+    return "first line matches /$re/";
+}
+
+BEGIN {
+    App::Ack::Filter->register_filter(firstlinematch => __PACKAGE__);
+}
+
+1;
+package App::Ack::Filter::Is;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+use File::Spec 3.00 ();
+
+sub new {
+    my ( $class, $filename ) = @_;
+
+    return bless {
+        filename => $filename,
+        groupname => 'IsGroup',
+    }, $class;
+}
+
+sub create_group {
+    return App::Ack::Filter::IsGroup->new();
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    my $filename = $self->{'filename'};
+    my $base     = (File::Spec->splitpath($resource->name))[2];
+
+    return $base eq $filename;
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    my $filename = $self->{'filename'};
+
+    return ref($self) . " - $filename";
+}
+
+sub to_string {
+    my ( $self ) = @_;
+
+    my $filename = $self->{'filename'};
+
+    return $filename;
+}
+
+BEGIN {
+    App::Ack::Filter->register_filter(is => __PACKAGE__);
+}
+
+1;
+package App::Ack::Filter::Match;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+use File::Spec 3.00;
+
+sub new {
+    my ( $class, $re ) = @_;
+
+    $re =~ s{^/|/$}{}g; # XXX validate?
+    $re = qr/$re/i;
+
+    return bless {
+        regex => $re,
+    }, $class;
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    my $re   = $self->{'regex'};
+    my $base = (File::Spec->splitpath($resource->name))[2];
+
+    return $base =~ /$re/;
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    my $re = $self->{'regex'};
+
+    print ref($self) . " - $re";
+}
+
+sub to_string {
+    my ( $self ) = @_;
+
+    my $re = $self->{'regex'};
+
+    return "filename matches $re";
+}
+
+BEGIN {
+    App::Ack::Filter->register_filter(match => __PACKAGE__);
+}
+
+1;
+package App::Ack::Filter::Default;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+sub new {
+    my ( $class ) = @_;
+
+    return bless {}, $class;
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    return -T $resource->name;
+}
+
+1;
+package App::Ack::Filter::Inverse;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+sub new {
+    my ( $class, $filter ) = @_;
+
+    return bless {
+        filter => $filter,
+    }, $class;
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    my $filter = $self->{'filter'};
+    return !$filter->filter( $resource );
+}
+
+sub invert {
+    my $self = shift;
+
+    return $self->{'filter'};
+}
+
+sub is_inverted {
+    return 1;
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    my $filter = $self->{'filter'};
+
+    return "!$filter";
+}
+
+1;
+package App::Ack::Filter::Collection;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+use File::Spec 3.00 ();
+
+sub new {
+    my ( $class ) = @_;
+
+    return bless {
+        groups => {},
+        ungrouped => [],
+    }, $class;
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    for my $group (values %{$self->{'groups'}}) {
+        if ($group->filter($resource)) {
+            return 1;
+        }
+    }
+
+    for my $filter (@{$self->{'ungrouped'}}) {
+        if ($filter->filter($resource)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+sub add {
+    my ( $self, $filter ) = @_;
+
+    if (exists $filter->{'groupname'}) {
+        my $groups = $self->{'groups'};
+        my $group_name = $filter->{'groupname'};
+
+        my $group;
+        if (exists $groups->{$group_name}) {
+            $group = $groups->{$group_name};
+        }
+        else {
+            $group = $groups->{$group_name} = $filter->create_group();
+        }
+
+        $group->add($filter);
+    }
+    else {
+        push @{$self->{'ungrouped'}}, $filter;
+    }
+
+    return;
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    return ref($self) . " - $self";
+}
+
+sub to_string {
+    my ( $self ) = @_;
+
+    my $ungrouped = $self->{'ungrouped'};
+
+    return join(', ', map { "($_)" } @{$ungrouped});
+}
+
+1;
+package App::Ack::Filter::IsGroup;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+use File::Spec 3.00 ();
+
+sub new {
+    my ( $class ) = @_;
+
+    return bless {
+        data => {},
+    }, $class;
+}
+
+sub add {
+    my ( $self, $filter ) = @_;
+
+    $self->{data}->{ $filter->{filename} } = 1;
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    my $data = $self->{'data'};
+    my $base = (File::Spec->splitpath($resource->name))[2];
+
+    return exists $data->{$base};
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    return ref($self) . " - $self";
+}
+
+sub to_string {
+    my ( $self ) = @_;
+
+    return join(' ', keys %{$self->{data}});
+}
+
+1;
+package App::Ack::Filter::ExtensionGroup;
+
+use strict;
+use warnings;
+BEGIN {
+    our @ISA = 'App::Ack::Filter';
+}
+
+use File::Spec 3.00 ();
+
+sub new {
+    my ( $class ) = @_;
+
+    return bless {
+        data => {},
+    }, $class;
+}
+
+sub add {
+    my ( $self, $filter ) = @_;
+
+    my $data = $self->{'data'};
+    my $extensions = $filter->{'extensions'};
+
+    foreach my $ext (@{$extensions}) {
+        $data->{lc $ext} = 1;
+    }
+}
+
+sub filter {
+    my ( $self, $resource ) = @_;
+
+    if ($resource->name =~ /[.]([^.]*)$/) {
+        return exists $self->{'data'}->{lc $1};
+    }
+
+    return 0;
+}
+
+sub inspect {
+    my ( $self ) = @_;
+
+    return ref($self) . " - $self";
+}
+
+sub to_string {
+    my ( $self ) = @_;
+
+    my $data = $self->{'data'};
+
+    return join(' ', map { ".$_" } (keys %$data));
+}
+
+1;
+package File::Next;
+
+use strict;
+use warnings;
+
+
+our $VERSION = '1.12';
+
+
+
+use File::Spec ();
+
+our $name; # name of the current file
+our $dir;  # dir of the current file
+
+our %files_defaults;
+our %skip_dirs;
+
+BEGIN {
+    %files_defaults = (
+        file_filter     => undef,
+        descend_filter  => undef,
+        error_handler   => sub { CORE::die @_ },
+        warning_handler => sub { CORE::warn @_ },
+        sort_files      => undef,
+        follow_symlinks => 1,
+        nul_separated   => 0,
+    );
+    %skip_dirs = map {($_,1)} (File::Spec->curdir, File::Spec->updir);
+}
+
+
+sub files {
+    die _bad_invocation() if @_ && defined($_[0]) && ($_[0] eq __PACKAGE__);
+
+    my ($parms,@queue) = _setup( \%files_defaults, @_ );
+    my $filter = $parms->{file_filter};
+
+    return sub {
+        while (@queue) {
+            my ($dirname,$file,$fullpath) = splice( @queue, 0, 3 );
+            if ( -f $fullpath || -p $fullpath || $fullpath =~ m{^/dev/fd} ) {
+                if ( $filter ) {
+                    local $_ = $file;
+                    local $File::Next::dir = $dirname;
+                    local $File::Next::name = $fullpath;
+                    next if not $filter->();
+                }
+                return wantarray ? ($dirname,$file,$fullpath) : $fullpath;
+            }
+            elsif ( -d _ ) {
+                unshift( @queue, _candidate_files( $parms, $fullpath ) );
+            }
+        } # while
+
+        return;
+    }; # iterator
+}
+
+
+
+
+
+
+sub from_file {
+    die _bad_invocation() if @_ && defined($_[0]) && ($_[0] eq __PACKAGE__);
+
+    my ($parms,@queue) = _setup( \%files_defaults, @_ );
+    my $err  = $parms->{error_handler};
+    my $warn = $parms->{error_handler};
+
+    my $filename = $queue[1];
+
+    if ( !defined($filename) ) {
+        $err->( 'Must pass a filename to from_file()' );
+        return undef;
+    }
+
+    my $fh;
+    if ( $filename eq '-' ) {
+        $fh = \*STDIN;
+    }
+    else {
+        if ( !open( $fh, '<', $filename ) ) {
+            $err->( "Unable to open $filename: $!" );
+            return undef;
+        }
+    }
+    my $filter = $parms->{file_filter};
+
+    return sub {
+        local $/ = $parms->{nul_separated} ? "\x00" : $/;
+        while ( my $fullpath = <$fh> ) {
+            chomp $fullpath;
+            next unless $fullpath =~ /./;
+            if ( not ( -f $fullpath || -p _ ) ) {
+                $warn->( "$fullpath: No such file" );
+                next;
+            }
+
+            my ($volume,$dirname,$file) = File::Spec->splitpath( $fullpath );
+            if ( $filter ) {
+                local $_ = $file;
+                local $File::Next::dir  = $dirname;
+                local $File::Next::name = $fullpath;
+                next if not $filter->();
+            }
+            return wantarray ? ($dirname,$file,$fullpath) : $fullpath;
+        } # while
+        close $fh;
+
+        return;
+    }; # iterator
+}
+
+sub _bad_invocation {
+    my $good = (caller(1))[3];
+    my $bad  = $good;
+    $bad =~ s/(.+)::/$1->/;
+    return "$good must not be invoked as $bad";
+}
+
+sub sort_standard($$)   { return $_[0]->[1] cmp $_[1]->[1] }
+sub sort_reverse($$)    { return $_[1]->[1] cmp $_[0]->[1] }
+
+sub reslash {
+    my $path = shift;
+
+    my @parts = split( /\//, $path );
+
+    return $path if @parts < 2;
+
+    return File::Spec->catfile( @parts );
+}
+
+
+
+sub _setup {
+    my $defaults = shift;
+    my $passed_parms = ref $_[0] eq 'HASH' ? {%{+shift}} : {}; # copy parm hash
+
+    my %passed_parms = %{$passed_parms};
+
+    my $parms = {};
+    for my $key ( keys %{$defaults} ) {
+        $parms->{$key} =
+            exists $passed_parms{$key}
+                ? delete $passed_parms{$key}
+                : $defaults->{$key};
+    }
+
+    # Any leftover keys are bogus
+    for my $badkey ( keys %passed_parms ) {
+        my $sub = (caller(1))[3];
+        $parms->{error_handler}->( "Invalid option passed to $sub(): $badkey" );
+    }
+
+    # If it's not a code ref, assume standard sort
+    if ( $parms->{sort_files} && ( ref($parms->{sort_files}) ne 'CODE' ) ) {
+        $parms->{sort_files} = \&sort_standard;
+    }
+    my @queue;
+
+    for ( @_ ) {
+        my $start = reslash( $_ );
+        if (-d $start) {
+            push @queue, ($start,undef,$start);
+        }
+        else {
+            push @queue, (undef,$start,$start);
+        }
+    }
+
+    return ($parms,@queue);
+}
+
+
+sub _candidate_files {
+    my $parms   = shift;
+    my $dirname = shift;
+
+    my $dh;
+    if ( !opendir $dh, $dirname ) {
+        $parms->{error_handler}->( "$dirname: $!" );
+        return;
+    }
+
+    my @newfiles;
+    my $descend_filter = $parms->{descend_filter};
+    my $follow_symlinks = $parms->{follow_symlinks};
+    my $sort_sub = $parms->{sort_files};
+
+    for my $file ( grep { !exists $skip_dirs{$_} } readdir $dh ) {
+        my $has_stat;
+
+        # Only do directory checking if we have a descend_filter
+        my $fullpath = File::Spec->catdir( $dirname, $file );
+        if ( !$follow_symlinks ) {
+            next if -l $fullpath;
+            $has_stat = 1;
+        }
+
+        if ( $descend_filter ) {
+            if ( $has_stat ? (-d _) : (-d $fullpath) ) {
+                local $File::Next::dir = $fullpath;
+                local $_ = $file;
+                next if not $descend_filter->();
+            }
+        }
+        if ( $sort_sub ) {
+            push( @newfiles, [ $dirname, $file, $fullpath ] );
+        }
+        else {
+            push( @newfiles, $dirname, $file, $fullpath );
+        }
+    }
+    closedir $dh;
+
+    if ( $sort_sub ) {
+        return map { @{$_} } sort $sort_sub @newfiles;
+    }
+
+    return @newfiles;
+}
+
+
+1; # End of File::Next
