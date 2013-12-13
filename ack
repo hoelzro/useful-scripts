@@ -14,7 +14,7 @@ package main;
 use strict;
 use warnings;
 
-our $VERSION = '2.11_02'; # Check http://beyondgrep.com/ for updates
+our $VERSION = '2.13_01'; # Check http://beyondgrep.com/ for updates
 
 use 5.008008;
 use Getopt::Long 2.35 ();
@@ -111,7 +111,7 @@ sub _compile_file_filter {
     $ifiles  ||= [];
 
     my $ifiles_filters = App::Ack::Filter::Collection->new();
-    
+
     foreach my $filter_spec (@{$ifiles}) {
         if ( $filter_spec =~ /^(\w+):(.+)/ ) {
             my ($how,$what) = ($1,$2);
@@ -949,7 +949,7 @@ RESOURCES:
                     show_types( $resource, $ors );
                 }
                 else {
-                    local $opt->{show_filename} = 0;
+                    local $opt->{show_filename} = 0; # XXX Why is this local?
 
                     print_line_with_options($opt, '', $resource->name, 0, $ors);
                 }
@@ -2171,6 +2171,9 @@ L<https://github.com/petdance/ack2>
 How appropriate to have I<ack>nowledgements!
 
 Thanks to everyone who has contributed to ack in any way, including
+Fraser Tweedale,
+RaE<aacute>l GundE<aacute>n,
+Steffen Jaeckel,
 Stephan Hohe,
 Michael Beijen,
 Alexandr Ciornii,
@@ -2276,12 +2279,10 @@ use strict;
 
 
 our $VERSION;
-our $GIT_REVISION;
 our $COPYRIGHT;
 BEGIN {
-    $VERSION = '2.11_02';
+    $VERSION = '2.13_01';
     $COPYRIGHT = 'Copyright 2005-2013 Andy Lester.';
-    $GIT_REVISION = q{dcff932};
 }
 
 our $fh;
@@ -2401,7 +2402,7 @@ sub _bar {
 77I!+!7!?!7!I"71+!7,
 _BAR
 
-    App::Ack::__pic($x);
+    return App::Ack::__pic($x);
 }
 
 sub _cathy {
@@ -2457,7 +2458,7 @@ sub _cathy {
  0?!$! &N! )." .,! %."M! ":!M!.! 0
  0N!:! %?!O! #.! ..! &,! &.!D!,! "N!I! 0
 CATHY
-    App::Ack::__pic($x);
+    return App::Ack::__pic($x);
 }
 
 sub __pic {
@@ -2673,10 +2674,8 @@ sub get_version_statement {
     }
     my $ver = sprintf( '%vd', $^V );
 
-    my $git_revision = $GIT_REVISION ? " (git commit $GIT_REVISION)" : '';
-
     return <<"END_OF_VERSION";
-ack ${VERSION}${git_revision}
+ack ${VERSION}
 Running under Perl $ver at $this_perl
 
 $copyright
@@ -3144,6 +3143,9 @@ sub _options_block {
 
 # CMake cache
 --ignore-directory=is:CMakeFiles
+
+# Eclipse workspace folder
+--ignore-directory=is:.metadata
 
 ### Files to ignore
 
@@ -3870,17 +3872,13 @@ sub process_other {
 
         if ( $source->{project} ) {
             my $illegal = sub {
-                my ( $option ) = @_;
-
-                return sub {
-                    die "Option $option is illegal in project ackrcs";
-                };
+                die "Options --output, --pager and --match are forbidden in project .ackrc files.\n";
             };
 
             $args_for_source = { %$args_for_source,
-                'output=s'=> $illegal->('--output'),
-                'pager:s' => $illegal->('--pager'),
-                'match=s' => $illegal->('--match'),
+                'output=s' => $illegal,
+                'pager:s'  => $illegal,
+                'match=s'  => $illegal,
             };
         }
 
@@ -4500,6 +4498,8 @@ sub inspect {
     my $re = $self->{'regex'};
 
     print ref($self) . " - $re";
+
+    return;
 }
 
 sub to_string {
@@ -4676,6 +4676,8 @@ sub add {
     my ( $self, $filter ) = @_;
 
     $self->{data}->{ $filter->{filename} } = 1;
+
+    return;
 }
 
 sub filter {
@@ -4748,9 +4750,7 @@ sub inspect {
 sub to_string {
     my ( $self ) = @_;
 
-    my $data = $self->{'data'};
-
-    return join(' ', map { ".$_" } (keys %$data));
+    return join(' ', map { ".$_" } sort keys %{$self->{data}});
 }
 
 1;
