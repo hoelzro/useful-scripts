@@ -61,7 +61,7 @@ sub draw_line {
 sub refresh_screen {
     my @lines = get_viewport;
 
-    clear;
+    erase;
     draw_cursor $cursor_index;
     my $index = 0;
     foreach my $line (@lines) {
