@@ -1,3 +1,4 @@
 #!/bin/bash
 
-sed -e 's/\x1b\[[^m]*m//g' $1 | col -b | vim -c 'set ft=man noswf noma nomod nolist ignorecase' -
+page=$(perl -a -F'/\0/' -n -E 'say $F[-1]' /proc/$PPID/cmdline)
+sed -e 's/\x1b\[[^m]*m//g' $1 | col -b | vim -c "set ft=man noswf noma nomod nolist ignorecase title titlestring=man\ $page" -
