@@ -8,6 +8,9 @@ use feature 'say';
 
 use File::KeePass;
 use Term::ReadPassword;
+use Time::Piece;
+
+my $DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S';
 
 die "usage: $0 [old] [new]\n" unless @ARGV >= 2;
 my ( $old_filename, $new_filename ) = @ARGV;
@@ -93,7 +96,11 @@ foreach my $group (sort keys %old_group_names) {
                 say $group, ':';
                 $group_printed = 1;
             }
-            say "  Entry '$old_entry->{'title'}' has two different passwords";
+            my $old_time = Time::Piece->strptime($old_entry->{'modified'}, $DATETIME_FORMAT);
+            my $new_time = Time::Piece->strptime($new_entry->{'modified'}, $DATETIME_FORMAT);
+
+            my $newer = $old_time < $new_time ? $new_filename : $old_filename;
+            say "  Entry '$old_entry->{'title'}' has two different passwords ($newer is newer)";
         }
     }
 }
