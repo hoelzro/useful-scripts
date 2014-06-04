@@ -41,13 +41,13 @@ my %new_group_names = map { $_->{'title'} => $i++ } @$new_groups;
 
 foreach my $k (sort keys %old_group_names) {
     unless(exists $new_group_names{$k}) {
-        say "Group '$k' exists in old DB, but not new"
+        say "Group '$k' exists in $old_filename, but not $new_filename"
     }
 }
 
 foreach my $k (sort keys %new_group_names) {
     unless(exists $old_group_names{$k}) {
-        say "Group '$k' exists in new DB, but not old"
+        say "Group '$k' exists in $new_filename, but not $old_filename"
     }
 }
 
@@ -73,7 +73,7 @@ foreach my $group (sort keys %old_group_names) {
                 say $group, ':';
                 $group_printed = 1;
             }
-            say "  Entry '$name' exists in old DB, but not new";
+            say "  Entry '$name' exists in $old_filename, but not $new_filename";
         }
     }
 
@@ -83,7 +83,7 @@ foreach my $group (sort keys %old_group_names) {
                 say $group, ':';
                 $group_printed = 1;
             }
-            say "  Entry '$name' exists in new DB, but not old";
+            say "  Entry '$name' exists in $new_filename, but not $old_filename";
         }
     }
 
