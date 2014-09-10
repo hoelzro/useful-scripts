@@ -4,7 +4,7 @@
 # Please DO NOT EDIT or send patches for it.
 #
 # Please take a look at the source from
-# http://github.com/petdance/ack2
+# https://github.com/petdance/ack2
 # and submit patches against the individual files
 # that build ack.
 #
@@ -14,11 +14,13 @@ package main;
 use strict;
 use warnings;
 
-our $VERSION = '2.13_01'; # Check http://beyondgrep.com/ for updates
+our $VERSION = '2.14'; # Check http://beyondgrep.com/ for updates
 
 use 5.008008;
 use Getopt::Long 2.35 ();
 use Carp 1.04 ();
+
+use File::Spec ();
 
 
 # XXX Don't make this so brute force
@@ -168,7 +170,19 @@ sub _compile_file_filter {
         }
     }
 
+    my $match_filenames = $opt->{g};
+    my $match_regex     = $opt->{regex};
+    my $is_inverted     = $opt->{v};
+
     return sub {
+        if ( $match_filenames ) {
+            if ( $File::Next::name =~ /$match_regex/ && $is_inverted ) {
+                return;
+            }
+            if ( $File::Next::name !~ /$match_regex/ && !$is_inverted ) {
+                return;
+            }
+        }
         # ack always selects files that are specified on the command
         # line, regardless of filetype.  If you want to ack a JPEG,
         # and say "ack foo whatever.jpg" it will do it for you.
@@ -199,19 +213,20 @@ sub _compile_file_filter {
         # command line" wins.
         return 0 if -p $File::Next::name;
 
-        # we can't handle unreadable filenames; report them
-        unless ( -r _ ) {
-            if ( $App::Ack::report_bad_filenames ) {
-                App::Ack::warn( "${File::Next::name}: cannot open file for reading" );
+        # We can't handle unreadable filenames; report them.
+        if ( not -r _ ) {
+            use filetest 'access';
+
+            if ( not -R $File::Next::name ) {
+                if ( $App::Ack::report_bad_filenames ) {
+                    App::Ack::warn( "${File::Next::name}: cannot open file for reading" );
+                }
+                return 0;
             }
-            return 0;
         }
 
         my $resource = App::Ack::Resource::Basic->new($File::Next::name);
-        return 0 if ! $resource;
-        if ( $ifiles_filters->filter($resource) ) {
-            return 0;
-        }
+        return 0 if !$resource || $ifiles_filters->filter($resource);
 
         my $match_found = $direct_filters->filter($resource);
 
@@ -302,8 +317,11 @@ sub build_regex {
 
     $str = quotemeta( $str ) if $opt->{Q};
     if ( $opt->{w} ) {
-        $str = "\\b$str" if $str =~ /^\w/;
-        $str = "$str\\b" if $str =~ /\w$/;
+        my $pristine_str = $str;
+
+        $str = "(?:$str)";
+        $str = "\\b$str" if $pristine_str =~ /^\w/;
+        $str = "$str\\b" if $pristine_str =~ /\w$/;
     }
 
     my $regex_is_lc = $str eq lc $str;
@@ -311,7 +329,7 @@ sub build_regex {
         $str = "(?i)$str";
     }
 
-    my $re = eval { qr/$str/ };
+    my $re = eval { qr/$str/m };
     if ( !$re ) {
         die "Invalid regex '$str':\n  $@";
     }
@@ -500,6 +518,7 @@ sub print_line_with_options {
     }
     if( $output_expr ) {
         while ( $line =~ /$opt->{regex}/og ) {
+            # XXX We need to stop using eval() for --output.  See https://github.com/petdance/ack2/issues/421
             my $output = eval $output_expr;
             App::Ack::print( join( $separator, @line_parts, $output ), $ors );
         }
@@ -584,14 +603,12 @@ sub iterate {
     my $fh = $resource->open();
     if ( !$fh ) {
         if ( $App::Ack::report_bad_filenames ) {
-            # XXX direct access to filename
-            App::Ack::warn( "$resource->{filename}: $!" );
+            App::Ack::warn( $resource->name . ': ' . $! );
         }
         return;
     }
 
-    # check for context before the main loop, so we don't
-    # pay for it if we don't need it
+    # Check for context before the main loop, so we don't pay for it if we don't need it.
     if ( $n_before_ctx_lines || $n_after_ctx_lines ) {
         my $current_line = <$fh>; # prime the first line of input
 
@@ -795,18 +812,27 @@ sub resource_has_match {
     my $fh = $resource->open();
     if ( !$fh ) {
         if ( $App::Ack::report_bad_filenames ) {
-            # XXX direct access to filename
-            App::Ack::warn( "$resource->{filename}: $!" );
+            App::Ack::warn( $resource->name . ': ' . $! );
         }
     }
     else {
-        my $opt_v = $opt->{v};
-        my $re    = $opt->{regex};
-        while ( <$fh> ) {
-            if (/$re/o xor $opt_v) {
-                $has_match = 1;
-                last;
+        my $re = $opt->{regex};
+        if ( $opt->{v} ) {
+            while ( <$fh> ) {
+                if (!/$re/o) {
+                    $has_match = 1;
+                    last;
+                }
             }
+        }
+        else {
+            # XXX read in chunks
+            # XXX only do this for certain file sizes?
+            my $content = do {
+                local $/;
+                <$fh>;
+            };
+            $has_match = $content =~ /$re/o;
         }
         close $fh;
     }
@@ -821,15 +847,22 @@ sub count_matches_in_resource {
     my $fh = $resource->open();
     if ( !$fh ) {
         if ( $App::Ack::report_bad_filenames ) {
-            # XXX direct access to filename
-            App::Ack::warn( "$resource->{filename}: $!" );
+            App::Ack::warn( $resource->name . ': ' . $! );
         }
     }
     else {
-        my $opt_v = $opt->{v};
-        my $re    = $opt->{regex};
-        while ( <$fh> ) {
-            ++$nmatches if (/$re/o xor $opt_v);
+        my $re = $opt->{regex};
+        if ( $opt->{v} ) {
+            while ( <$fh> ) {
+                ++$nmatches if (!/$re/o);
+            }
+        }
+        else {
+            my $content = do {
+                local $/;
+                <$fh>;
+            };
+            $nmatches =()= ($content =~ /$re/og);
         }
         close $fh;
     }
@@ -851,7 +884,7 @@ sub main {
     if ( !defined($opt->{color}) && !$opt->{g} ) {
         my $windows_color = 1;
         if ( $App::Ack::is_windows ) {
-            $windows_color = eval { require Win32::Console::ANSI; }
+            $windows_color = eval { require Win32::Console::ANSI; };
         }
         $opt->{color} = !App::Ack::output_to_pipe() && $windows_color;
     }
@@ -927,9 +960,6 @@ sub main {
     my $total_count = 0;
 RESOURCES:
     while ( my $resource = $resources->next ) {
-        # XXX this variable name combined with what we're trying
-        # to do makes no sense.
-
         # XXX Combine the -f and -g functions
         if ( $opt->{f} ) {
             # XXX printing should probably happen inside of App::Ack
@@ -943,19 +973,16 @@ RESOURCES:
             last RESOURCES if defined($max_count) && $nmatches >= $max_count;
         }
         elsif ( $opt->{g} ) {
-            my $is_match = ( $resource->name =~ /$opt->{regex}/o );
-            if ( $opt->{v} ? !$is_match : $is_match ) {
-                if ( $opt->{show_types} ) {
-                    show_types( $resource, $ors );
-                }
-                else {
-                    local $opt->{show_filename} = 0; # XXX Why is this local?
-
-                    print_line_with_options($opt, '', $resource->name, 0, $ors);
-                }
-                ++$nmatches;
-                last RESOURCES if defined($max_count) && $nmatches >= $max_count;
+            if ( $opt->{show_types} ) {
+                show_types( $resource, $ors );
             }
+            else {
+                local $opt->{show_filename} = 0; # XXX Why is this local?
+
+                print_line_with_options($opt, '', $resource->name, 0, $ors);
+            }
+            ++$nmatches;
+            last RESOURCES if defined($max_count) && $nmatches >= $max_count;
         }
         elsif ( $opt->{lines} ) {
             my $print_filename = $opt->{show_filename};
@@ -991,7 +1018,7 @@ RESOURCES:
         elsif ( $opt->{count} ) {
             my $matches_for_this_file = count_matches_in_resource( $resource, $opt );
 
-            unless ( $opt->{show_filename} ) {
+            if ( not $opt->{show_filename} ) {
                 $total_count += $matches_for_this_file;
                 next RESOURCES;
             }
@@ -1045,7 +1072,7 @@ ack - grep-like text finder
 
 =head1 DESCRIPTION
 
-Ack is designed as a replacement for 99% of the uses of F<grep>.
+Ack is designed as an alternative to F<grep> for programmers.
 
 Ack searches the named input FILEs (or standard input if no files
 are named, or the file name - is given) for lines containing a match
@@ -1671,6 +1698,27 @@ If you are not on Windows, you never need to use C<ACK_PAGER_COLOR>.
 
 =back
 
+=head1 AVAILABLE COLORS
+
+F<ack> uses the colors available in Perl's L<Term::ANSIColor> module, which
+provides the following listed values. Note that case does not matter when using
+these values.
+
+=head2 Foreground colors
+
+    black  red  green  yellow  blue  magenta  cyan  white
+
+    bright_black  bright_red      bright_green  bright_yellow
+    bright_blue   bright_magenta  bright_cyan   bright_white
+
+=head2 Background colors
+
+    on_black  on_red      on_green  on_yellow
+    on_blue   on_magenta  on_cyan   on_white
+
+    on_bright_black  on_bright_red      on_bright_green  on_bright_yellow
+    on_bright_blue   on_bright_magenta  on_bright_cyan   on_bright_white
+
 =head1 ACK & OTHER TOOLS
 
 =head2 Vim integration
@@ -1934,18 +1982,31 @@ using C<--ignore-ack-defaults>.
 =item * Global ackrc
 
 Options are then loaded from the global ackrc.  This is located at
-C</etc/ackrc> on Unix-like systems, and
-C<C:\Documents and Settings\All Users\Application Data\ackrc> on Windows.
-This can be omitted using C<--noenv>.
+C</etc/ackrc> on Unix-like systems.
+
+Under Windows XP and earlier, the ackrc is at
+C<C:\Documents and Settings\All Users\Application Data\ackrc>.
+
+Under Windows Vista/7, the global ackrc is at
+C<C:\ProgramData>
+
+The C<--noenv> option prevents all ackrc files from being loaded.
 
 =item * User ackrc
 
 Options are then loaded from the user's ackrc.  This is located at
-C<$HOME/.ackrc> on Unix-like systems, and
-C<C:\Documents and Settings\$USER\Application Data\ackrc>.  If a different
-ackrc is desired, it may be overridden with the C<$ACKRC> environment
-variable.
-This can be omitted using C<--noenv>.
+C<$HOME/.ackrc> on Unix-like systems.
+
+Under Windows XP and earlier, the user's ackrc is at
+C<C:\Documents and Settings\$USER\Application Data\ackrc>.
+
+Under Windows Vista/7, the user's ackrc is at
+<C:\Users\$USER\AppData\Roaming>.
+
+If you want to load a different user-level ackrc, it may be specified
+with the C<$ACKRC> environment variable.
+
+The C<--noenv> option prevents all ackrc files from being loaded.
 
 =item * Project ackrc
 
@@ -2171,6 +2232,15 @@ L<https://github.com/petdance/ack2>
 How appropriate to have I<ack>nowledgements!
 
 Thanks to everyone who has contributed to ack in any way, including
+Stephen Thirlwall,
+Jonah Bishop,
+Chris Rebert,
+Denis Howe,
+RaE<uacute>l GundE<iacute>n,
+James McCoy,
+Daniel Perrett,
+Steven Lee,
+Jonathan Perret,
 Fraser Tweedale,
 RaE<aacute>l GundE<aacute>n,
 Steffen Jaeckel,
@@ -2263,7 +2333,7 @@ Rob Hoelz.
 
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2005-2013 Andy Lester.
+Copyright 2005-2014 Andy Lester.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the Artistic License v2.0.
@@ -2281,8 +2351,8 @@ use strict;
 our $VERSION;
 our $COPYRIGHT;
 BEGIN {
-    $VERSION = '2.13_01';
-    $COPYRIGHT = 'Copyright 2005-2013 Andy Lester.';
+    $VERSION = '2.14';
+    $COPYRIGHT = 'Copyright 2005-2014 Andy Lester.';
 }
 
 our $fh;
@@ -2611,7 +2681,11 @@ Miscellaneous:
 
 Exit status is 0 if match, 1 if no match.
 
-This is version $VERSION of ack.
+ack's home page is at http://beyondgrep.com/
+
+The full ack manual is available by running "ack --man".
+
+This is version $VERSION of ack.  Run "ack --version" for full version info.
 END_OF_HELP
 
     return;
@@ -2698,7 +2772,7 @@ sub get_copyright {
 }
 
 
-# print subs added in order to make it easy for a third party
+# print*() subs added in order to make it easy for a third party
 # module (such as App::Wack) to redefine the display methods
 # and show the results in a different way.
 sub print                   { print {$fh} @_; return; }
@@ -2838,6 +2912,28 @@ package App::Ack::Resources;
 use warnings;
 use strict;
 
+sub _generate_error_handler {
+    my $opt = shift;
+
+    if ( $opt->{dont_report_bad_filenames} ) {
+        return sub {
+            my $msg = shift;
+            # XXX restricting to specific error messages for now; I would
+            #     prefer a different way of doing this
+            if ( $msg =~ /Permission denied/ ) {
+                return;
+            }
+            App::Ack::warn( $msg );
+        };
+    }
+    else {
+        return sub {
+            my $msg = shift;
+            App::Ack::warn( $msg );
+        };
+    }
+}
+
 
 sub from_argv {
     my $class = shift;
@@ -2859,7 +2955,8 @@ sub from_argv {
         File::Next::files( {
             file_filter     => $opt->{file_filter},
             descend_filter  => $descend_filter,
-            error_handler   => sub { my $msg = shift; App::Ack::warn( $msg ) },
+            error_handler   => _generate_error_handler($opt),
+            warning_handler => sub {},
             sort_files      => $opt->{sort_files},
             follow_symlinks => $opt->{follow},
         }, @{$start} );
@@ -2875,8 +2972,8 @@ sub from_file {
 
     my $iter =
         File::Next::from_file( {
-            error_handler   => sub { my $msg = shift; App::Ack::warn( $msg ) },
-            warning_handler => sub { my $msg = shift; App::Ack::warn( $msg ) },
+            error_handler   => _generate_error_handler($opt),
+            warning_handler => _generate_error_handler($opt),
             sort_files      => $opt->{sort_files},
         }, $file ) or return undef;
 
@@ -2925,6 +3022,7 @@ use Fcntl ();
 BEGIN {
     our @ISA = 'App::Ack::Resource';
 }
+
 
 
 sub new {
@@ -3024,7 +3122,7 @@ sub firstliney {
 
     my $fh = $self->open();
 
-    unless(exists $self->{firstliney}) {
+    if ( !exists $self->{firstliney} ) {
         my $buffer = '';
         my $rc     = sysread( $fh, $buffer, 250 );
         unless($rc) { # XXX handle this better?
@@ -3045,7 +3143,7 @@ sub open {
 
     return $self->{fh} if $self->{opened};
 
-    unless ( open $self->{fh}, '<', $self->{filename} ) {
+    if ( ! open $self->{fh}, '<', $self->{filename} ) {
         return;
     }
 
@@ -3060,16 +3158,21 @@ package App::Ack::ConfigDefault;
 use warnings;
 use strict;
 
-sub options {
-    my @options = split( /\n/, _options_block() );
-    @options = grep { /./ && !/^#/ } @options;
 
-    return @options;
+
+sub options {
+    return split( /\n/, _options_block() );
 }
 
+
+sub options_clean {
+    return grep { /./ && !/^#/ } options();
+}
+
+
 sub _options_block {
-    return <<'HERE';
-# This is the default ackrc for ack 2.0
+    my $lines = <<'HERE';
+# This is the default ackrc for ack version ==VERSION==.
 
 # There are four different ways to match
 #
@@ -3087,48 +3190,61 @@ sub _options_block {
 ### Directories to ignore
 
 # Bazaar
+# http://bazaar.canonical.com/
 --ignore-directory=is:.bzr
 
 # Codeville
+# http://freecode.com/projects/codeville
 --ignore-directory=is:.cdv
 
-# Interface Builder
+# Interface Builder (Xcode)
+# http://en.wikipedia.org/wiki/Interface_Builder
 --ignore-directory=is:~.dep
 --ignore-directory=is:~.dot
 --ignore-directory=is:~.nib
 --ignore-directory=is:~.plst
 
 # Git
+# http://git-scm.com/
 --ignore-directory=is:.git
 
 # Mercurial
+# http://mercurial.selenic.com/
 --ignore-directory=is:.hg
 
 # quilt
+# http://directory.fsf.org/wiki/Quilt
 --ignore-directory=is:.pc
 
 # Subversion
+# http://subversion.tigris.org/
 --ignore-directory=is:.svn
 
 # Monotone
+# http://www.monotone.ca/
 --ignore-directory=is:_MTN
 
 # CVS
+# http://savannah.nongnu.org/projects/cvs
 --ignore-directory=is:CVS
 
 # RCS
+# http://www.gnu.org/software/rcs/
 --ignore-directory=is:RCS
 
 # SCCS
+# http://en.wikipedia.org/wiki/Source_Code_Control_System
 --ignore-directory=is:SCCS
 
 # darcs
+# http://darcs.net/
 --ignore-directory=is:_darcs
 
 # Vault/Fortress
 --ignore-directory=is:_sgbak
 
 # autoconf
+# http://www.gnu.org/software/autoconf/
 --ignore-directory=is:autom4te.cache
 
 # Perl module building
@@ -3136,16 +3252,23 @@ sub _options_block {
 --ignore-directory=is:_build
 
 # Perl Devel::Cover module's output directory
+# https://metacpan.org/release/Devel-Cover
 --ignore-directory=is:cover_db
 
 # Node modules created by npm
 --ignore-directory=is:node_modules
 
 # CMake cache
+# http://www.cmake.org/
 --ignore-directory=is:CMakeFiles
 
 # Eclipse workspace folder
+# http://eclipse.org/
 --ignore-directory=is:.metadata
+
+# Cabal (Haskell) sandboxes
+# http://www.haskell.org/cabal/users-guide/installing-packages.html
+--ignore-directory=is:.cabal-sandbox
 
 ### Files to ignore
 
@@ -3156,7 +3279,7 @@ sub _options_block {
 # Emacs swap files
 --ignore-file=match:/^#.+#$/
 
-# vi/vim swap files
+# vi/vim swap files http://vim.org/
 --ignore-file=match:/[._].*\.swp$/
 
 # core dumps
@@ -3170,6 +3293,10 @@ sub _options_block {
 --ignore-file=match:/[.]min[.]css$/
 --ignore-file=match:/[.]css[.]min$/
 
+# JS and CSS source maps
+--ignore-file=match:/[.]js[.]map$/
+--ignore-file=match:/[.]css[.]map$/
+
 # PDFs, because they pass Perl's -T detection
 --ignore-file=ext:pdf
 
@@ -3179,37 +3306,45 @@ sub _options_block {
 
 ### Filetypes defined
 
-# Perl http://perl.org/
+# Perl
+# http://perl.org/
 --type-add=perl:ext:pl,pm,pod,t,psgi
 --type-add=perl:firstlinematch:/^#!.*\bperl/
 
 # Perl tests
 --type-add=perltest:ext:t
 
-# Makefiles http://www.gnu.org/s/make/
+# Makefiles
+# http://www.gnu.org/s/make/
 --type-add=make:ext:mk
 --type-add=make:ext:mak
 --type-add=make:is:makefile
 --type-add=make:is:Makefile
---type-add=make:is:GNUmakefile
+--type-add=make:is:Makefile.Debug
+--type-add=make:is:Makefile.Release
 
-# Rakefiles http://rake.rubyforge.org/
+# Rakefiles
+# http://rake.rubyforge.org/
 --type-add=rake:is:Rakefile
 
-# CMake http://www.cmake.org/
+# CMake
+# http://www.cmake.org/
 --type-add=cmake:is:CMakeLists.txt
 --type-add=cmake:ext:cmake
 
 # Actionscript
 --type-add=actionscript:ext:as,mxml
 
-# Ada http://www.adaic.org/
+# Ada
+# http://www.adaic.org/
 --type-add=ada:ext:ada,adb,ads
 
-# ASP http://msdn.microsoft.com/en-us/library/aa286483.aspx
+# ASP
+# http://msdn.microsoft.com/en-us/library/aa286483.aspx
 --type-add=asp:ext:asp
 
-# ASP.Net http://www.asp.net/
+# ASP.Net
+# http://www.asp.net/
 --type-add=aspx:ext:master,ascx,asmx,aspx,svc
 
 # Assembly
@@ -3218,10 +3353,12 @@ sub _options_block {
 # Batch
 --type-add=batch:ext:bat,cmd
 
-# ColdFusion http://en.wikipedia.org/wiki/ColdFusion
+# ColdFusion
+# http://en.wikipedia.org/wiki/ColdFusion
 --type-add=cfmx:ext:cfc,cfm,cfml
 
-# Clojure http://clojure.org/
+# Clojure
+# http://clojure.org/
 --type-add=clojure:ext:clj
 
 # C
@@ -3231,7 +3368,8 @@ sub _options_block {
 # C header files
 --type-add=hh:ext:h
 
-# CoffeeScript http://coffeescript.org/
+# CoffeeScript
+# http://coffeescript.org/
 --type-add=coffeescript:ext:coffee
 
 # C++
@@ -3240,58 +3378,78 @@ sub _options_block {
 # C#
 --type-add=csharp:ext:cs
 
-# CSS http://www.w3.org/Style/CSS/
+# CSS
+# http://www.w3.org/Style/CSS/
 --type-add=css:ext:css
 
-# Dart http://www.dartlang.org/
+# Dart
+# http://www.dartlang.org/
 --type-add=dart:ext:dart
 
-# Delphi http://en.wikipedia.org/wiki/Embarcadero_Delphi
+# Delphi
+# http://en.wikipedia.org/wiki/Embarcadero_Delphi
 --type-add=delphi:ext:pas,int,dfm,nfm,dof,dpk,dproj,groupproj,bdsgroup,bdsproj
 
-# Elixir http://elixir-lang.org/
+# Elixir
+# http://elixir-lang.org/
 --type-add=elixir:ext:ex,exs
 
-# Emacs Lisp http://www.gnu.org/software/emacs
+# Emacs Lisp
+# http://www.gnu.org/software/emacs
 --type-add=elisp:ext:el
 
-# Erlang http://www.erlang.org/
+# Erlang
+# http://www.erlang.org/
 --type-add=erlang:ext:erl,hrl
 
-# Fortran http://en.wikipedia.org/wiki/Fortran
+# Fortran
+# http://en.wikipedia.org/wiki/Fortran
 --type-add=fortran:ext:f,f77,f90,f95,f03,for,ftn,fpp
 
-# Google Go http://golang.org/
+# Go
+# http://golang.org/
 --type-add=go:ext:go
 
-# Groovy http://groovy.codehaus.org/
+# Groovy
+# http://groovy.codehaus.org/
 --type-add=groovy:ext:groovy,gtmpl,gpp,grunit,gradle
 
-# Haskell http://www.haskell.org/
+# Haskell
+# http://www.haskell.org/
 --type-add=haskell:ext:hs,lhs
 
 # HTML
 --type-add=html:ext:htm,html
 
-# Java http://www.oracle.com/technetwork/java/index.html
+# Jade
+# http://jade-lang.com/
+--type-add=jade:ext:jade
+
+# Java
+# http://www.oracle.com/technetwork/java/index.html
 --type-add=java:ext:java,properties
 
 # JavaScript
 --type-add=js:ext:js
 
-# JSP http://www.oracle.com/technetwork/java/javaee/jsp/index.html
+# JSP
+# http://www.oracle.com/technetwork/java/javaee/jsp/index.html
 --type-add=jsp:ext:jsp,jspx,jhtm,jhtml
 
-# JSON http://www.json.org/
+# JSON
+# http://www.json.org/
 --type-add=json:ext:json
 
-# Less http://www.lesscss.org/
+# Less
+# http://www.lesscss.org/
 --type-add=less:ext:less
 
-# Common Lisp http://common-lisp.net/
+# Common Lisp
+# http://common-lisp.net/
 --type-add=lisp:ext:lisp,lsp
 
-# Lua http://www.lua.org/
+# Lua
+# http://www.lua.org/
 --type-add=lua:ext:lua
 --type-add=lua:firstlinematch:/^#!.*\blua(jit)?/
 
@@ -3301,63 +3459,92 @@ sub _options_block {
 # Objective-C++
 --type-add=objcpp:ext:mm,h
 
-# OCaml http://caml.inria.fr/
+# OCaml
+# http://caml.inria.fr/
 --type-add=ocaml:ext:ml,mli
 
-# Matlab http://en.wikipedia.org/wiki/MATLAB
+# Matlab
+# http://en.wikipedia.org/wiki/MATLAB
 --type-add=matlab:ext:m
 
-# Parrot http://www.parrot.org/
+# Parrot
+# http://www.parrot.org/
 --type-add=parrot:ext:pir,pasm,pmc,ops,pod,pg,tg
 
-# PHP http://www.php.net/
+# PHP
+# http://www.php.net/
 --type-add=php:ext:php,phpt,php3,php4,php5,phtml
 --type-add=php:firstlinematch:/^#!.*\bphp/
 
-# Plone http://plone.org/
+# Plone
+# http://plone.org/
 --type-add=plone:ext:pt,cpt,metadata,cpy,py
 
-# Python http://www.python.org/
+# Python
+# http://www.python.org/
 --type-add=python:ext:py
 --type-add=python:firstlinematch:/^#!.*\bpython/
 
-# R http://www.r-project.org/
+# R
+# http://www.r-project.org/
 --type-add=rr:ext:R
 
-# Ruby http://www.ruby-lang.org/
+# reStructured Text
+# http://docutils.sourceforge.net/rst.html
+--type-add=rst:ext:rst
+
+# Ruby
+# http://www.ruby-lang.org/
 --type-add=ruby:ext:rb,rhtml,rjs,rxml,erb,rake,spec
 --type-add=ruby:is:Rakefile
 --type-add=ruby:firstlinematch:/^#!.*\bruby/
 
-# Rust http://www.rust-lang.org/
+# Rust
+# http://www.rust-lang.org/
 --type-add=rust:ext:rs
 
-# Sass http://sass-lang.com
+# Sass
+# http://sass-lang.com
 --type-add=sass:ext:sass,scss
 
-# Scala http://www.scala-lang.org/
+# Scala
+# http://www.scala-lang.org/
 --type-add=scala:ext:scala
 
-# Scheme http://groups.csail.mit.edu/mac/projects/scheme/
+# Scheme
+# http://groups.csail.mit.edu/mac/projects/scheme/
 --type-add=scheme:ext:scm,ss
 
 # Shell
 --type-add=shell:ext:sh,bash,csh,tcsh,ksh,zsh,fish
 --type-add=shell:firstlinematch:/^#!.*\b(?:ba|t?c|k|z|fi)?sh\b/
 
-# Smalltalk http://www.smalltalk.org/
+# Smalltalk
+# http://www.smalltalk.org/
 --type-add=smalltalk:ext:st
 
-# SQL http://www.iso.org/iso/catalogue_detail.htm?csnumber=45498
+# Smarty
+# http://www.smarty.net/
+--type-add=smarty:ext:tpl
+
+# SQL
+# http://www.iso.org/iso/catalogue_detail.htm?csnumber=45498
 --type-add=sql:ext:sql,ctl
 
-# Tcl http://www.tcl.tk/
+# Stylus
+# http://learnboost.github.io/stylus/
+--type-add=stylus:ext:styl
+
+# Tcl
+# http://www.tcl.tk/
 --type-add=tcl:ext:tcl,itcl,itk
 
-# LaTeX http://www.latex-project.org/
+# LaTeX
+# http://www.latex-project.org/
 --type-add=tex:ext:tex,cls,sty
 
-# Template Toolkit http://template-toolkit.org/
+# Template Toolkit (Perl)
+# http://template-toolkit.org/
 --type-add=tt:ext:tt,tt2,ttml
 
 # Visual Basic
@@ -3366,19 +3553,26 @@ sub _options_block {
 # Verilog
 --type-add=verilog:ext:v,vh,sv
 
-# VHDL http://www.eda.org/twiki/bin/view.cgi/P1076/WebHome
+# VHDL
+# http://www.eda.org/twiki/bin/view.cgi/P1076/WebHome
 --type-add=vhdl:ext:vhd,vhdl
 
-# Vim http://www.vim.org/
+# Vim
+# http://www.vim.org/
 --type-add=vim:ext:vim
 
-# XML http://www.w3.org/TR/REC-xml/
+# XML
+# http://www.w3.org/TR/REC-xml/
 --type-add=xml:ext:xml,dtd,xsl,xslt,ent
 --type-add=xml:firstlinematch:/<[?]xml/
 
-# YAML http://yaml.org/
+# YAML
+# http://yaml.org/
 --type-add=yaml:ext:yaml,yml
 HERE
+    $lines =~ s/==VERSION==/$App::Ack::VERSION/sm;
+
+    return $lines;
 }
 
 1;
@@ -3400,43 +3594,23 @@ sub new {
     return bless {}, $class;
 }
 
+
 sub _remove_redundancies {
-    my ( @configs ) = @_;
+    my @configs = @_;
 
-    if ( $App::Ack::is_windows ) {
-        # inode stat always returns 0 on windows, so just check filenames.
-        my (%seen, @uniq);
-
-        foreach my $path (map { $_->{path} } @configs) {
-            push @uniq, $path unless $seen{$path};
-            $seen{$path} = 1;
+    my %seen;
+    foreach my $config (@configs) {
+        my $key = $config->{path};
+        if ( not $App::Ack::is_windows ) {
+            # On Unix, uniquify on inode.
+            my ($dev, $inode) = (stat $key)[0, 1];
+            $key = "$dev:$inode" if defined $dev;
         }
-
-        return @uniq;
+        undef $config if $seen{$key}++;
     }
-
-    else {
-
-        my %dev_and_inode_seen;
-
-        foreach my $config ( @configs ) {
-            my $path = $config->{path};
-            my ( $dev, $inode ) = (stat $path)[0, 1];
-
-            if( defined($dev) ) {
-                if( $dev_and_inode_seen{"$dev:$inode"} ) {
-                    undef $config;
-                }
-                else {
-                    $dev_and_inode_seen{"$dev:$inode"} = 1;
-                }
-            }
-        }
-
-        return grep { defined() } @configs;
-
-    }
+    return grep { defined } @configs;
 }
+
 
 sub _check_for_ackrc {
     return unless defined $_[0];
@@ -3451,6 +3625,7 @@ sub _check_for_ackrc {
 
     return wantarray ? @files : $files[0];
 } # end _check_for_ackrc
+
 
 
 sub find_config_files {
@@ -3474,7 +3649,11 @@ sub find_config_files {
         push @config_files, map { +{ path => $_ } } _check_for_ackrc($ENV{'HOME'});
     }
 
-    my @dirs = File::Spec->splitdir(Cwd::getcwd());
+    # XXX This should go through some untainted cwd-fetching function, and not get untainted inline like this.
+    my $cwd = Cwd::getcwd();
+    $cwd =~ /(.+)/;
+    $cwd = $1;
+    my @dirs = File::Spec->splitdir( $cwd );
     while(@dirs) {
         my $ackrc = _check_for_ackrc(@dirs);
         if(defined $ackrc) {
@@ -3484,10 +3663,10 @@ sub find_config_files {
         pop @dirs;
     }
 
-    # XXX we only test for existence here, so if the file is
-    #     deleted out from under us, this will fail later. =(
+    # We only test for existence here, so if the file is deleted out from under us, this will fail later.
     return _remove_redundancies( @config_files );
 }
+
 
 
 sub read_rcfile {
@@ -3504,11 +3683,11 @@ sub read_rcfile {
         $line =~ s/\s+$//;
 
         next if $line eq '';
-        next if $line =~ /^#/;
+        next if $line =~ /^\s*#/;
 
         push( @lines, $line );
     }
-    close $fh;
+    close $fh or App::Ack::die( "Unable to close $file: $!" );
 
     return @lines;
 }
@@ -3551,6 +3730,7 @@ BEGIN {
     );
 }
 
+
 sub process_filter_spec {
     my ( $spec ) = @_;
 
@@ -3575,6 +3755,7 @@ sub process_filter_spec {
     }
 }
 
+
 sub uninvert_filter {
     my ( $opt, @filters ) = @_;
 
@@ -3593,6 +3774,7 @@ sub uninvert_filter {
         }
     }
 }
+
 
 sub process_filetypes {
     my ( $opt, $arg_sources ) = @_;
@@ -3685,6 +3867,7 @@ sub process_filetypes {
     return \%additional_specs;
 }
 
+
 sub removed_option {
     my ( $option, $explanation ) = @_;
 
@@ -3695,15 +3878,17 @@ sub removed_option {
     };
 }
 
+
 sub get_arg_spec {
     my ( $opt, $extra_specs ) = @_;
 
-    my $dash_a_explanation = <<EOT;
+    my $dash_a_explanation = <<'EOT';
 This is because we now have -k/--known-types which makes it only select files
 of known types, rather than any text file (which is the behavior of ack 1.x).
 You may have options in a .ackrc, or in the ACKRC_OPTIONS environment variable.
 Try using the --dump flag.
 EOT
+
 
     return {
         1                   => sub { $opt->{1} = $opt->{m} = 1 },
@@ -3741,17 +3926,16 @@ EOT
         'h|no-filename'     => \$opt->{h},
         'H|with-filename'   => \$opt->{H},
         'i|ignore-case'     => \$opt->{i},
-        'ignore-directory|ignore-dir=s' # XXX Combine this version with the negated version below
-                            => sub {
-                                my ( undef, $dir ) = @_;
+        'ignore-directory|ignore-dir=s' => sub {
+                                    my ( undef, $dir ) = @_;
 
-                                $dir = App::Ack::remove_dir_sep( $dir );
-                                if ( $dir !~ /^(?:is|match):/ ) {
-                                    $dir = 'is:' . $dir;
-                                }
-                                push @{ $opt->{idirs} }, $dir;
-                               },
-        'ignore-file=s'    => sub {
+                                    $dir = App::Ack::remove_dir_sep( $dir );
+                                    if ( $dir !~ /^(?:is|match):/ ) {
+                                        $dir = 'is:' . $dir;
+                                    }
+                                    push @{ $opt->{idirs} }, $dir;
+        },
+        'ignore-file=s'     => sub {
                                     my ( undef, $file ) = @_;
                                     push @{ $opt->{ifiles} }, $file;
                                },
@@ -3788,7 +3972,7 @@ EOT
                                 } @{ $opt->{idirs} };
 
                                 push @{ $opt->{no_ignore_dirs} }, $dir;
-                               },
+                            },
         'nopager'           => sub { $opt->{pager} = undef },
         'passthru'          => \$opt->{passthru},
         'print0'            => \$opt->{print0},
@@ -3829,10 +4013,12 @@ EOT
     }; # arg_specs
 }
 
+
 sub process_other {
     my ( $opt, $extra_specs, $arg_sources ) = @_;
 
-    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version'); # start with default options, minus some annoying ones
+    # Start with default options, minus some annoying ones.
+    Getopt::Long::Configure('default', 'no_auto_help', 'no_auto_version');
     Getopt::Long::Configure(
         'bundling',
         'no_ignore_case',
@@ -3908,9 +4094,9 @@ sub process_other {
     return;
 }
 
+
 sub should_dump_options {
     my ( $sources ) = @_;
-
 
     foreach my $source (@{$sources}) {
         my ( $name, $options ) = @{$source}{qw/name contents/};
@@ -3928,6 +4114,7 @@ sub should_dump_options {
     }
     return;
 }
+
 
 sub explode_sources {
     my ( $sources ) = @_;
@@ -3964,7 +4151,8 @@ sub explode_sources {
             $source->{contents} = $options =
                 [ Text::ParseWords::shellwords($options) ];
         }
-        for ( my $j = 0; $j < @{$options}; $j++ ) {
+
+        for my $j ( 0 .. @{$options}-1 ) {
             next unless $options->[$j] =~ /^-/;
             my @chunk = ( $options->[$j] );
             push @chunk, $options->[$j] while ++$j < @{$options} && $options->[$j] !~ /^-/;
@@ -3989,6 +4177,7 @@ sub explode_sources {
     return \@new_sources;
 }
 
+
 sub compare_opts {
     my ( $a, $b ) = @_;
 
@@ -4000,6 +4189,7 @@ sub compare_opts {
 
     return $first_a cmp $first_b;
 }
+
 
 sub dump_options {
     my ( $sources ) = @_;
@@ -4029,12 +4219,13 @@ sub dump_options {
     return;
 }
 
+
 sub remove_default_options_if_needed {
     my ( $sources ) = @_;
 
     my $default_index;
 
-    foreach my $index ( 0 .. $#$sources ) {
+    foreach my $index ( 0 .. $#{$sources} ) {
         if ( $sources->[$index]{'name'} eq 'Defaults' ) {
             $default_index = $index;
             last;
@@ -4053,7 +4244,7 @@ sub remove_default_options_if_needed {
         'pass_through',
     );
 
-    foreach my $index ( $default_index + 1 .. $#$sources ) {
+    foreach my $index ( $default_index + 1 .. $#{$sources} ) {
         my ( $name, $args ) = @{$sources->[$index]}{qw/name contents/};
 
         if (ref($args)) {
@@ -4079,6 +4270,7 @@ sub remove_default_options_if_needed {
     splice @copy, $default_index, 1;
     return \@copy;
 }
+
 
 sub check_for_mutually_exclusive_options {
     my ( $arg_sources ) = @_;
@@ -4129,6 +4321,7 @@ sub check_for_mutually_exclusive_options {
         }
     }
 }
+
 
 sub process_args {
     my $arg_sources = \@_;
@@ -4212,7 +4405,7 @@ sub retrieve_arg_sources {
 
     push @arg_sources, {
         name     => 'Defaults',
-        contents => [ App::Ack::ConfigDefault::options() ],
+        contents => [ App::Ack::ConfigDefault::options_clean() ],
     };
 
     foreach my $file ( @files) {
@@ -4586,8 +4779,6 @@ BEGIN {
     our @ISA = 'App::Ack::Filter';
 }
 
-use File::Spec 3.00 ();
-
 sub new {
     my ( $class ) = @_;
 
@@ -4619,17 +4810,7 @@ sub add {
     my ( $self, $filter ) = @_;
 
     if (exists $filter->{'groupname'}) {
-        my $groups = $self->{'groups'};
-        my $group_name = $filter->{'groupname'};
-
-        my $group;
-        if (exists $groups->{$group_name}) {
-            $group = $groups->{$group_name};
-        }
-        else {
-            $group = $groups->{$group_name} = $filter->create_group();
-        }
-
+        my $group = ($self->{groups}->{$filter->{groupname}} ||= $filter->create_group());
         $group->add($filter);
     }
     else {
@@ -4710,8 +4891,6 @@ BEGIN {
     our @ISA = 'App::Ack::Filter';
 }
 
-use File::Spec 3.00 ();
-
 sub new {
     my ( $class ) = @_;
 
@@ -4723,12 +4902,11 @@ sub new {
 sub add {
     my ( $self, $filter ) = @_;
 
-    my $data = $self->{'data'};
-    my $extensions = $filter->{'extensions'};
-
-    foreach my $ext (@{$extensions}) {
-        $data->{lc $ext} = 1;
+    foreach my $ext (@{$filter->{extensions}}) {
+        $self->{data}->{lc $ext} = 1;
     }
+
+    return;
 }
 
 sub filter {
