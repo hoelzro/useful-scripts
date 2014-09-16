@@ -91,7 +91,12 @@ foreach my $group (sort keys %old_group_names) {
         next unless exists $new_names{$old_entry->{'title'}};
 
         my $new_entry = $new_entries[$new_names{$old_entry->{'title'}}];
-        unless($old_entry->{'password'} eq $new_entry->{'password'}) {
+
+        my $matches = $old_entry->{'password'} eq $new_entry->{'password'} &&
+                      $old_entry->{'comment'}  eq $new_entry->{'comment'}  &&
+                      $old_entry->{'url'}      eq $new_entry->{'url'};
+
+        unless($matches) {
             unless($group_printed) {
                 say $group, ':';
                 $group_printed = 1;
@@ -100,7 +105,7 @@ foreach my $group (sort keys %old_group_names) {
             my $new_time = Time::Piece->strptime($new_entry->{'modified'}, $DATETIME_FORMAT);
 
             my $newer = $old_time < $new_time ? $new_filename : $old_filename;
-            say "  Entry '$old_entry->{'title'}' has two different passwords ($newer is newer)";
+            say "  Entry '$old_entry->{'title'}' has two different contents ($newer is newer)";
         }
     }
 }
