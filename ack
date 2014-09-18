@@ -338,6 +338,8 @@ sub build_regex {
 
 }
 
+my $match_column_number;
+
 {
 
 my @before_ctx_lines;
@@ -349,6 +351,20 @@ my $has_printed_something;
 BEGIN {
     $has_printed_something = 0;
 }
+
+=for Developers
+
+This subroutine jumps through a number of optimization hoops to
+try to be fast in the more common use cases of ack.  For one thing,
+in non-context tracking searches (not using -A, -B, or -C),
+conditions that normally would be checked inside the loop happen
+outside, resulting in three nearly identical loops for -v, --passthru,
+and normal searching.  Any changes that happen to one should propagate
+to the others if they make sense.  The non-context branches also inline
+does_match for performance reasons; any relevant changes that happen here
+must also happen there.
+
+=cut
 
 sub print_matches_in_resource {
     my ( $resource, $opt ) = @_;
@@ -449,8 +465,100 @@ sub print_matches_in_resource {
     else {
         local $_;
 
-        while ( <$fh> ) {
-            if ( does_match($opt, $_) ) {
+        my $regex   = $opt->{regex};
+        my $inverse = $opt->{v};
+
+        if ( $passthru ) {
+            while ( <$fh> ) {
+                $match_column_number = undef;
+                if ( $inverse ? !/$regex/o : /$regex/o ) {
+                    if ( !$inverse ) {
+                        $match_column_number = $-[0] + 1;
+                    }
+                    if ( !$has_printed_for_this_resource ) {
+                        if ( $break && $has_printed_something ) {
+                            App::Ack::print_blank_line();
+                        }
+                        if ( $print_filename && $heading ) {
+                            App::Ack::print_filename( $display_filename, $ors );
+                        }
+                    }
+                    print_line_with_context($opt, $filename, $_, $.);
+                    $has_printed_for_this_resource = 1;
+                    $nmatches++;
+                    $max_count--;
+                }
+                else {
+                    chomp; # XXX proper newline handling?
+                    if ( $break && !$has_printed_for_this_resource && $has_printed_something ) {
+                        App::Ack::print_blank_line();
+                    }
+                    print_line_with_options($opt, $filename, $_, $., ':');
+                    $has_printed_for_this_resource = 1;
+                }
+                last unless $max_count != 0;
+            }
+        }
+        elsif ( $inverse ) {
+            $match_column_number = undef;
+            while ( <$fh> ) {
+                if ( !/$regex/o ) {
+                    if ( !$has_printed_for_this_resource ) {
+                        if ( $break && $has_printed_something ) {
+                            App::Ack::print_blank_line();
+                        }
+                        if ( $print_filename && $heading ) {
+                            App::Ack::print_filename( $display_filename, $ors );
+                        }
+                    }
+                    print_line_with_context($opt, $filename, $_, $.);
+                    $has_printed_for_this_resource = 1;
+                    $nmatches++;
+                    $max_count--;
+                }
+                last unless $max_count != 0;
+            }
+        }
+        else {
+            # XXX unroll first match check ($has_printed_for_this_resource)
+            # XXX what if this is a *huge* file? (see also -l)
+            my $contents = do {
+                local $/;
+                <$fh>;
+            };
+
+            my $prev_match_end = 0;
+            my $line_no = 1;
+
+            $match_column_number = undef;
+            while ( $contents =~ /$regex/og ) {
+                my $match_start = $-[0];
+                my $match_end   = $+[0];
+
+                pos($contents)  = $prev_match_end;
+                $prev_match_end = $match_end;
+
+                while ( $contents =~ /\n/og && $-[0] < $match_start ) {
+                    $line_no++;
+                }
+
+                my $start_line = rindex($contents, "\n", $match_start);
+                my $end_line   = index($contents, "\n", $match_end);
+
+                if ( $start_line == -1 ) {
+                    $start_line = 0;
+                }
+                else {
+                    $start_line++;
+                }
+
+                if ( $end_line == -1 ) {
+                    $end_line = length($contents);
+                }
+                else {
+                    $end_line--;
+                }
+                $match_column_number = $match_start - $start_line + 1;
                 if ( !$has_printed_for_this_resource ) {
                     if ( $break && $has_printed_something ) {
                         App::Ack::print_blank_line();
@@ -459,21 +567,20 @@ sub print_matches_in_resource {
                         App::Ack::print_filename( $display_filename, $ors );
                     }
                 }
-                print_line_with_context($opt, $filename, $_, $.);
+                my $line = substr($contents, $start_line, $end_line - $start_line + 1);
+                $line =~ s/[\r\n]+$//g;
+                print_line_with_options($opt, $filename, $line, $line_no, ':');
+
+                pos($contents) = $end_line + 1;
+
                 $has_printed_for_this_resource = 1;
                 $nmatches++;
                 $max_count--;
+
+                last unless $max_count != 0;
             }
-            elsif ( $passthru ) {
-                chomp; # XXX proper newline handling?
-                if ( $break && !$has_printed_for_this_resource && $has_printed_something ) {
-                    App::Ack::print_blank_line();
-                }
-                print_line_with_options($opt, $filename, $_, $., ':');
-                $has_printed_for_this_resource = 1;
-            }
-            last unless $max_count != 0;
         }
+
     }
 
     $is_iterating = 0; # XXX this won't happen on an exception
@@ -772,11 +879,15 @@ sub print_line_with_context {
 
 }
 
-{
-
-my $match_column_number;
-
 # does_match() MUST have an $opt->{regex} set.
+
+=for Developers
+
+This subroutine is inlined a few places in print_matches_in_resource
+for performance reasons, so any changes here must be copied there as
+well.
+
+=cut
 
 sub does_match {
     my ( $opt, $line ) = @_;
@@ -801,8 +912,6 @@ sub does_match {
 
 sub get_match_column {
     return $match_column_number;
-}
-
 }
 
 sub resource_has_match {
@@ -3018,6 +3127,7 @@ use warnings;
 use strict;
 
 use Fcntl ();
+use File::Spec ();
 
 BEGIN {
     our @ISA = 'App::Ack::Resource';
@@ -3048,6 +3158,16 @@ sub name {
     return $_[0]->{filename};
 }
 
+sub basename {
+    my ( $self ) = @_;
+
+    # XXX definedness? pre-populate the slot with an undef?
+    unless ( exists $self->{basename} ) {
+        $self->{basename} = (File::Spec->splitpath($self->name))[2];
+    }
+
+    return $self->{basename};
+}
 
 
 sub needs_line_scan {
@@ -4679,10 +4799,9 @@ sub new {
 sub filter {
     my ( $self, $resource ) = @_;
 
-    my $re   = $self->{'regex'};
-    my $base = (File::Spec->splitpath($resource->name))[2];
+    my $re = $self->{'regex'};
 
-    return $base =~ /$re/;
+    return $resource->basename =~ /$re/;
 }
 
 sub inspect {
