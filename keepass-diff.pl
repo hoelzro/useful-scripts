@@ -6,11 +6,24 @@ use strict;
 use warnings;
 use feature 'say';
 
+use Digest;
 use File::KeePass;
 use Term::ReadPassword;
 use Time::Piece;
 
 my $DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S';
+
+sub sha1 {
+    my ( $filename ) = @_;
+
+    my $digest = Digest->new('SHA1');
+    open my $fh, '<', $filename or die $!;
+    $digest->addfile($fh);
+
+    close $fh;
+
+    return $digest->hexdigest;
+}
 
 die "usage: $0 [old] [new]\n" unless @ARGV >= 2;
 my ( $old_filename, $new_filename ) = @ARGV;
@@ -39,15 +52,19 @@ my %old_group_names = map { $_->{'title'} => $i++ } @$old_groups;
 $i = 0;
 my %new_group_names = map { $_->{'title'} => $i++ } @$new_groups;
 
+my $difference_count = 0;
+
 foreach my $k (sort keys %old_group_names) {
     unless(exists $new_group_names{$k}) {
-        say "Group '$k' exists in $old_filename, but not $new_filename"
+        say "Group '$k' exists in $old_filename, but not $new_filename";
+        $difference_count++;
     }
 }
 
 foreach my $k (sort keys %new_group_names) {
     unless(exists $old_group_names{$k}) {
-        say "Group '$k' exists in $new_filename, but not $old_filename"
+        say "Group '$k' exists in $new_filename, but not $old_filename";
+        $difference_count++;
     }
 }
 
@@ -74,6 +91,7 @@ foreach my $group (sort keys %old_group_names) {
                 $group_printed = 1;
             }
             say "  Entry '$name' exists in $old_filename, but not $new_filename";
+            $difference_count++;
         }
     }
 
@@ -84,6 +102,7 @@ foreach my $group (sort keys %old_group_names) {
                 $group_printed = 1;
             }
             say "  Entry '$name' exists in $new_filename, but not $old_filename";
+            $difference_count++;
         }
     }
 
@@ -106,6 +125,16 @@ foreach my $group (sort keys %old_group_names) {
 
             my $newer = $old_time < $new_time ? $new_filename : $old_filename;
             say "  Entry '$old_entry->{'title'}' has two different contents ($newer is newer)";
+            $difference_count++;
         }
+    }
+}
+
+if($difference_count == 0) {
+    my $old_checksum = sha1($old_filename);
+    my $new_checksum = sha1($new_filename);
+
+    if($old_checksum ne $new_checksum) {
+        say "There were no detected differences in the entries, but the files are different.  That's odd...";
     }
 }
