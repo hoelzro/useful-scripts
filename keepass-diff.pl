@@ -113,6 +113,7 @@ foreach my $group (sort keys %old_group_names) {
 
         my $matches = $old_entry->{'password'} eq $new_entry->{'password'} &&
                       $old_entry->{'comment'}  eq $new_entry->{'comment'}  &&
+                      $old_entry->{'username'} eq $new_entry->{'username'} &&
                       $old_entry->{'url'}      eq $new_entry->{'url'};
 
         unless($matches) {
