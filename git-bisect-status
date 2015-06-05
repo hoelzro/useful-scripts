@@ -1,0 +1,24 @@
+#!/usr/bin/env perl
+
+# git bisect-status: automatically update your window title with your git-bisect status
+# intended to be run within scripts run via git bisect run.
+
+use strict;
+use warnings;
+
+my @lines = qx(git rev-list --bisect --bisect-vars);
+chomp @lines;
+my %vars = map { /^(\w+)=(\d+)$/ ? ($1, $2) : () } @lines;
+
+my ( $bisect_nr, $bisect_steps ) = @vars{qw/bisect_nr bisect_steps/};
+
+my $rev_plural   = $bisect_nr    == 1 ? '' : 's';
+my $steps_plural = $bisect_steps == 1 ? '' : 's';
+
+my $title = "Bisecting: $bisect_nr revision$rev_plural left to test after this (roughly $bisect_steps step$steps_plural)";
+
+if($ENV{'TMUX'}) {
+    print "\ek$title\e\\";
+} else {
+    print "\e]2;$title\a";
+}
