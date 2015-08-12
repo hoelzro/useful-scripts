@@ -3,6 +3,9 @@
 use strict;
 use warnings;
 
+# sets the terminal title to the space-separated concatenation
+# of the script arguments
+
 my $title = join(' ', @ARGV);
 
 if($ENV{'TMUX'}) {
