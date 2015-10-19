@@ -1,0 +1,21 @@
+#!/home/rob/.mokudo/bin/perl6
+
+use v6;
+
+my $default-branch = 'master';
+
+sub MAIN() {
+    my $branch = current-branch();
+
+    if !$branch {
+        die "You're in a detached HEAD state, I don't really know how to handle that yet!";
+    }
+
+    if $branch eq $default-branch {
+        run('git', 'checkout', '-b', generate-wip-branch-name());
+    }
+
+    run('git', 'commit', '-a', '-m', 'WIP: git bg');
+
+    run('git', 'checkout', $default-branch);
+}

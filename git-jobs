@@ -1,0 +1,35 @@
+use v6;
+
+sub branch-to-top-commit(Str $branch) {
+    my @lines = qq:x"git log --pretty='%ct%n%s' -1 $branch".chomp.lines;
+
+    my ( $timestamp, $subject ) = @lines;
+
+    return {
+        :$branch,
+        :$timestamp,
+        :$subject,
+    }
+}
+
+sub is-wip(%commit-info) returns Bool {
+    (%commit-info<subject> ~~ /^ \s* WIP/).Bool
+}
+
+sub MAIN() {
+    my $default-branch = 'master';
+    my @branches = qq:x"git branch --list --no-color".chomp.lines;
+    @branches = @branches».substr(2);
+    @branches .= grep(* ne $default-branch);
+
+    my @commits = @branches.map: { branch-to-top-commit($_) };
+    @commits .= grep: { is-wip($_) };
+
+    @commits = @commits.sort({
+        $^a<timestamp> <=> $^b<timestamp>
+    }).reverse;
+
+    for 1..+@commits Z @commits -> [$reference, $commit-info] {
+        say $reference, ' ', $commit-info<branch>;
+    }
+}

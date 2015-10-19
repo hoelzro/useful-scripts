@@ -1,0 +1,57 @@
+#!/home/rob/.mokudo/bin/perl6
+
+use v6;
+
+my $*BRANCH-VERIFIED = False;
+
+sub resolve-git-job-reference(Int $target-refnum) returns Str {
+    my @lines = qq:x"git jobs".chomp.lines;
+
+    my Str $branch-name;
+
+    for @lines -> $line {
+        my ( $refnum, $name ) = $line.split;
+
+        if $refnum == $target-refnum {
+            return $name;
+        }
+    }
+
+    die "Unable to resolve $target-refnum to a branch name";
+}
+
+sub assert-branch-wip(Str $branch) {
+    return if $*BRANCH-VERIFIED;
+
+    my @lines = qq:x"git jobs".chomp.lines;
+
+    for @lines -> $line {
+        my ( $, $name ) = $line.split;
+
+        if $branch eq $name {
+            return;
+        }
+    }
+
+    die "Branch '$branch' wasn't backgrounded";
+}
+
+sub assert-worktree-clean() {
+}
+
+multi sub MAIN() {
+    MAIN(1)
+}
+
+multi sub MAIN(Int $branch-reference) {
+    my $*BRANCH-VERIFIED = True;
+
+    MAIN(resolve-git-job-reference($branch-reference))
+}
+
+multi sub MAIN(Str $branch) {
+    assert-branch-wip($branch);
+    assert-worktree-clean();
+    run('git', 'checkout', $branch);
+    run('git', 'reset', 'HEAD^');
+}
