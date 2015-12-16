@@ -8,6 +8,8 @@ use warnings;
 
 my $title = join(' ', @ARGV);
 
+exit unless $title;
+
 if($ENV{'TMUX'}) {
     print "\ek$title\e\\";
 } else {

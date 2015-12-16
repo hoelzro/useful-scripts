@@ -8,7 +8,8 @@ use strict;
 use warnings;
 use feature qw(say);
 
-my @lines = qx(git rev-list --bisect --bisect-vars);
+my @lines = qx(git rev-list --bisect --bisect-vars 2>/dev/null);
+exit unless @lines;
 chomp @lines;
 my %vars = map { /^(\w+)=(\d+)$/ ? ($1, $2) : () } @lines;
 
