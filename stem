@@ -1,0 +1,26 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+
+use List::MoreUtils qw(each_array);
+use Search::Xapian;
+
+die "usage: $0 [lang] [list of documents or standard input]\n" unless @ARGV;
+
+my $lang = shift @ARGV;
+
+my $stem = Search::Xapian::Stem->new($lang);
+
+while(<>) {
+    chomp;
+    my @terms         = split /\s+/, $_;
+    my @stemmed_terms = map { $stem->stem_word($_) } @terms;
+
+    my $iter = each_array @terms, @stemmed_terms;
+
+    while(my ($term, $stemmed_term) = $iter->()) {
+        say join("\t", $term, $stemmed_term);
+    }
+}
