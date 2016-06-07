@@ -25,6 +25,12 @@ sub sha1 {
     return $digest->hexdigest;
 }
 
+sub flatten_groups {
+    my ( $groups, @prefix ) = @_;
+
+    return map { $_->{'title'} = join('.', @prefix, $_->{'title'}); ($_, flatten_groups($_->{'groups'}, @prefix, $_->{'title'})) } @$groups;
+}
+
 die "usage: $0 [old] [new]\n" unless @ARGV >= 2;
 my ( $old_filename, $new_filename ) = @ARGV;
 die "File '$old_filename' does not exist\n" unless -e $old_filename;
@@ -45,12 +51,12 @@ if($@) {
     $new->unlock;
 }
 
-my $old_groups = $old->groups;
-my $new_groups = $new->groups;
+my @old_groups = flatten_groups $old->groups;
+my @new_groups = flatten_groups $new->groups;
 my $i = 0;
-my %old_group_names = map { $_->{'title'} => $i++ } @$old_groups;
+my %old_group_names = map { $_->{'title'} => $i++ } @old_groups;
 $i = 0;
-my %new_group_names = map { $_->{'title'} => $i++ } @$new_groups;
+my %new_group_names = map { $_->{'title'} => $i++ } @new_groups;
 
 my $difference_count = 0;
 
@@ -74,8 +80,8 @@ foreach my $group (sort keys %old_group_names) {
 
     my $group_printed;
 
-    my $old_group = $old_groups->[$old_group_names{$group}];
-    my $new_group = $new_groups->[$new_group_names{$group}];
+    my $old_group = $old_groups[$old_group_names{$group}];
+    my $new_group = $new_groups[$new_group_names{$group}];
     my @old_entries = sort { $a->{'title'} cmp $b->{'title'} } @{ $old_group->{'entries'} };
     my @new_entries = sort { $a->{'title'} cmp $b->{'title'} } @{ $new_group->{'entries'} };
 
