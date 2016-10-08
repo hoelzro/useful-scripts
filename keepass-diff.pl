@@ -6,9 +6,9 @@ use strict;
 use warnings;
 use feature 'say';
 
+use Config;
 use Digest;
 use File::KeePass;
-use Term::ReadPassword;
 use Time::Piece;
 
 my $DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S';
@@ -29,6 +29,17 @@ sub flatten_groups {
     my ( $groups, @prefix ) = @_;
 
     return map { $_->{'title'} = join('.', @prefix, $_->{'title'}); ($_, flatten_groups($_->{'groups'}, @prefix, $_->{'title'})) } @$groups;
+}
+
+# set up read_password on Win32
+my $fnref;
+if($Config{'osname'} =~ /MSWin/i) {
+	eval "use Term::ReadPassword::Win32;
+	\$fnref = \\&read_password" or die $@;
+}
+else {
+	eval "use Term::ReadPassword;
+	\$fnref = \\&read_password" or die $@;
 }
 
 die "usage: $0 [old] [new]\n" unless @ARGV >= 2;
