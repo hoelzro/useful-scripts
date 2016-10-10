@@ -6,6 +6,7 @@ use strict;
 use warnings;
 use feature 'say';
 
+use Config;
 use Digest;
 use File::KeePass;
 use Time::Piece;
@@ -40,12 +41,23 @@ sub flatten_groups {
     return map { $_->{'title'} = join('.', @prefix, $_->{'title'}); ($_, flatten_groups($_->{'groups'}, @prefix, $_->{'title'})) } @$groups;
 }
 
+# set up read_password on Win32
+my $read_password_ref;
+if($Config{'osname'} =~ /MSWin/i) {
+	eval "use Term::ReadPassword::Win32;
+	\$read_password_ref = \\&read_password" or die $@;
+}
+else {
+	eval "use Term::ReadPassword;
+	\$read_password_ref = \\&read_password" or die $@;
+}
+
 die "usage: $0 [old] [new]\n" unless @ARGV >= 2;
 my ( $old_filename, $new_filename ) = @ARGV;
 die "File '$old_filename' does not exist\n" unless -e $old_filename;
 die "File '$new_filename' does not exist\n" unless -e $new_filename;
 
-my $password = read_password("Password for '$old_filename': ");
+my $password = &$read_password_ref("Password for '$old_filename': ");
 my $old = File::KeePass->new;
 $old->load_db($old_filename, $password);
 $old->unlock;
@@ -55,7 +67,7 @@ eval {
     $new->unlock;
 };
 if($@) {
-    $password = read_password("Password for '$new_filename': ");
+    $password = &$read_password_ref("Password for '$new_filename': ");
     $new->load_db($new_filename, $password);
     $new->unlock;
 }
