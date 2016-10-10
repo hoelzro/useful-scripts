@@ -8,8 +8,17 @@ use feature 'say';
 
 use Digest;
 use File::KeePass;
-use Term::ReadPassword;
 use Time::Piece;
+
+BEGIN {
+    if($^O eq 'MSWin32') {
+        require Term::ReadPassword::Win32;
+        *read_password = \&Term::ReadPassword::Win32::read_password;
+    } else {
+        require Term::ReadPassword;
+        *read_password = \&Term::ReadPassword::read_password;
+    }
+}
 
 my $DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S';
 
