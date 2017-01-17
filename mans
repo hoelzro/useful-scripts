@@ -1,0 +1,3 @@
+#!/bin/sh
+
+pkg_files $1 | grep /usr/share/man
