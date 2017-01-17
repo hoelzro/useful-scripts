@@ -1,0 +1,19 @@
+#!/usr/bin/env perl
+
+use autodie;
+use strict;
+use warnings;
+use feature qw(say);
+
+die "usage: $0 [package]\n" unless @ARGV;
+my ( $pkg ) = @ARGV;
+open my $pipe, '-|', 'pacman', '-Ql', $pkg;
+while(<$pipe>) {
+    chomp;
+    my ( undef, $filename ) = split;
+
+    if($filename !~ m{/$}) {
+        say $filename;
+    }
+}
+close $pipe;
