@@ -1,6 +1,5 @@
 #!/usr/bin/env perl
 
-use autodie;
 use strict;
 use warnings;
 use feature qw(say);
@@ -16,4 +15,7 @@ while(<$pipe>) {
         say $filename;
     }
 }
-close $pipe;
+my $status = close $pipe;
+if(!$status) {
+    warn "pacman encountered an issue (likely reported above) - exiting\n";
+}
