@@ -1,0 +1,34 @@
+#!/usr/bin/env perl
+
+use autodie;
+use strict;
+use warnings;
+use feature qw(say);
+use experimental 'signatures';
+
+use Cwd qw(getcwd);
+use File::Basename qw(basename);
+
+sub resolve_instead_of($shortcut_name) {
+    open my $pipe, '-|', 'git', 'config', '--list';
+    my ( $server, $directory );
+    while(<$pipe>) {
+        chomp;
+
+        if(/^url[.](.*):(.*)[.]insteadof=\Q$shortcut_name\E/) {
+            ( $server, $directory ) = ( $1, $2);
+        }
+    }
+    close $pipe;
+    return ( $server, $directory );
+}
+
+my $repo_name = basename(getcwd());
+
+my ( $server, $repos_directory ) = resolve_instead_of('private');
+
+die "You don't have a shortcut set up for private:" unless defined($server) && defined($repos_directory);
+
+system 'ssh', $server, "git init --bare $repos_directory/$repo_name.git";
+system 'git', 'remote', 'add', 'origin', "private:$repo_name";
+system 'git', 'push', '--set-upstream', 'origin', 'master:master';
