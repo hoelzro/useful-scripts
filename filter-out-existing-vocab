@@ -1,0 +1,5 @@
+#!/bin/bash
+
+VOCAB_DECK=1455034696860
+
+combine "$1" not <(sqlite3 ~/Anki/User\ 1/collection.anki2 "select n.flds from cards as c inner join notes as n on n.id = c.nid where c.did = $VOCAB_DECK" | perl -nle 'my @fields = split("\x1f", $_); print $fields[0]')
