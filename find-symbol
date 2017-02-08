@@ -1,0 +1,61 @@
+#!/usr/bin/env perl
+
+use autodie;
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+use File::Find;
+
+sub find_so_files_in_package($package) {
+    my @results;
+
+    open my $pipe, '-|', 'pacman', '-Ql', $package;
+    while(<$pipe>) {
+        chomp;
+        my ( undef, $filename ) = split;
+        next unless $filename =~ m{^/usr/lib/.*[.]so$};
+        push @results, $filename;
+    }
+    close $pipe;
+
+    return @results;
+}
+
+sub find_all_so_files() {
+    my @results;
+
+    find(sub {
+        return unless /[.]so$/;
+        push @results, $File::Find::name;
+    }, '/usr/lib/');
+
+    return @results;
+}
+
+die "usage: $0 symbol [package]\n" unless @ARGV;
+
+my ( $symbol, $package ) = @ARGV;
+
+my @so_files;
+
+if($package) {
+    @so_files = find_so_files_in_package($package);
+} else {
+    @so_files = find_all_so_files();
+}
+
+for my $so_file (@so_files) {
+    open my $pipe, '-|', 'objdump', '-T', $so_file;
+    while(<$pipe>) {
+        chomp;
+        unless(/DYNAMIC SYMBOL TABLE/../^\s*$/) {
+            next;
+        }
+        next if /DYNAMIC SYMBOL TABLE/ || /^\s*$/;
+        my $name = (split)[-1];
+        say $so_file if $name eq $symbol && $_ !~ /[*]UND[*]/;
+    }
+    close $pipe;
+}
