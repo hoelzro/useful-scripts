@@ -11,7 +11,9 @@ local function match_firefox(c)
 end
 
 for c in iterate(match_firefox, 1, nil) do
-  jumpto(c)
+  if not string.find(c.name, 'Private Browsing') then
+    jumpto(c)
+  end
   break
 end
 END_LUA
