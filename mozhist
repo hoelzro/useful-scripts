@@ -1,0 +1,3 @@
+#!/bin/bash
+
+sqlite3 -column -cmd '.width 19 120' ~/.mozilla/firefox/*.default/places.sqlite "select datetime(hv.visit_date / 1000000, 'unixepoch'), p.url from moz_places as p inner join moz_historyvisits as hv on hv.place_id = p.id order by hv.visit_date"
