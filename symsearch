@@ -1,0 +1,52 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+use File::Find;
+
+die <<"END_USAGE" unless @ARGV;
+usage: $0 [symbol]
+
+By default, searches all .so files under /usr/lib for any library
+containing code for the given symbol.
+
+If standard input is a pipe, it is treated as a list of library
+files to search.
+
+For example:
+
+\$ symsearch fread # searches all of /usr/lib recursively
+
+\$ ls /usr/lib/*.so | symsearch fread # searches just /usr/lib/*.so
+
+\$ libs glibc | symbsearch fread # searches all libraries in the glibc package (using https://github.com/hoelzro/useful-scripts/blob/master/libs)
+
+END_USAGE
+
+my ( $symbol ) = @ARGV;
+
+my @target_libs;
+
+if(-p STDIN) {
+    @target_libs = <STDIN>;
+    chomp @target_libs;
+} else {
+    find(sub {
+        return unless /[.]so$/;
+        push @target_libs, $File::Find::name;
+    }, '/usr/lib');
+}
+
+for my $lib (@target_libs) {
+    next unless $lib =~ /[.]so$/;
+
+    my @lines = qx(objdump -T $lib 2>/dev/null);
+    my @matches = grep /\Q$symbol\E/, @lines;
+    @matches = grep { !/[*]UND[*]/ } @matches;
+    next unless @matches;
+
+    say $lib;
+}
