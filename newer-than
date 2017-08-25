@@ -1,0 +1,30 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+
+use File::stat;
+
+# filters a list of files coming in over standard input and only lists those that
+# are newer than the provided file
+
+die "usage: $0 [filename]\n" unless @ARGV;
+
+my $target = shift @ARGV;
+
+my $target_mtime = (stat($target) or die "Can't stat '$target': $!")->mtime;
+
+while(<>) {
+    chomp;
+
+    my $st = stat($_);
+    unless($st) {
+        warn "Can't stat '$_': $!";
+        next;
+    }
+
+    if($st->mtime > $target_mtime) {
+        say;
+    }
+}
