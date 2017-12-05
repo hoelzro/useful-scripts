@@ -1,0 +1,34 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+my @agent_pids = split /\s+/, qx(pidof ssh-agent);
+
+die "More than one ssh-agent is active\n" if @agent_pids > 1;
+
+open my $pipe, '| awesome-client';
+
+say {$pipe} <<"END_LUA";
+local naughty = require 'naughty'
+local function alert(msg)
+  naughty.notify {
+    title = 'Alert!',
+    text  = tostring(msg),
+    preset = naughty.config.presets.critical,
+  }
+end
+
+local ok, err = pcall(function()
+    local posix = require 'posix'
+
+    posix.setenv('SSH_AUTH_SOCK', '/home/rob/.ssh/agent_sock')
+    posix.setenv('SSH_AGENT_PID', $agent_pids[0])
+end)
+
+if not ok then
+    alert(err)
+end
+END_LUA
