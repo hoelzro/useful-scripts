@@ -77,6 +77,7 @@ foreach my $k (sort keys %old_group_names) {
 }
 
 foreach my $k (sort keys %new_group_names) {
+    next if $k eq 'Backup';
     unless(exists $old_group_names{$k}) {
         say "Group '$k' exists in $new_filename, but not $old_filename";
         $difference_count++;
