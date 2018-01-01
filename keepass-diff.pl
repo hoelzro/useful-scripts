@@ -37,6 +37,10 @@ sub sha1 {
 sub flatten_groups {
     my ( $groups, @prefix ) = @_;
 
+    if($groups && @$groups == 1 && $groups->[0]{'title'} eq 'Root') {
+        return flatten_groups($groups->[0]{'groups'});
+    }
+
     return map { $_->{'title'} = join('.', @prefix, $_->{'title'}); ($_, flatten_groups($_->{'groups'}, @prefix, $_->{'title'})) } @$groups;
 }
 
@@ -101,6 +105,8 @@ foreach my $group (sort keys %old_group_names) {
     my %new_names = map { $_->{'title'} => $i++ } @new_entries;
 
     foreach my $name (sort keys %old_names) {
+        next if $name eq 'Meta-Info';
+
         unless(exists $new_names{$name}) {
             unless($group_printed) {
                 say $group, ':';
@@ -112,6 +118,8 @@ foreach my $group (sort keys %old_group_names) {
     }
 
     foreach my $name (sort keys %new_names) {
+        next if $name eq 'Meta-Info';
+
         unless(exists $old_names{$name}) {
             unless($group_printed) {
                 say $group, ':';
@@ -124,6 +132,7 @@ foreach my $group (sort keys %old_group_names) {
 
     foreach my $old_entry (@old_entries) {
         next unless exists $new_names{$old_entry->{'title'}};
+        next if $old_entry->{'title'} eq 'Meta-Info';
 
         my $new_entry = $new_entries[$new_names{$old_entry->{'title'}}];
 
