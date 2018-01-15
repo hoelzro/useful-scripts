@@ -31,6 +31,17 @@ my $filename_re = qr{
     $
 }x;
 
+# Example: '         file name: [No Name]'
+my $orig_filename_re = qr{
+    ^
+    \s*
+    file\s+name:
+    \s*
+    (?<filename>.*?)
+    \s*
+    $
+}x;
+
 # Examples: '        process ID: 719'
 #           '        process ID: 7608 (still running)'
 my $pid_re = qr{
@@ -50,6 +61,7 @@ my $pid_re = qr{
 
 my $swap_directory;
 my $swap_filename;
+my $original_filename;
 
 while(<$pipe>) {
     chomp;
@@ -58,8 +70,10 @@ while(<$pipe>) {
         $swap_directory = $+{'directory'};
     } elsif(/$filename_re/) {
         $swap_filename = $+{'filename'};
+    } elsif(/$orig_filename_re/) {
+        $original_filename = $+{'filename'};
     } elsif(/$pid_re/) {
-        say File::Spec->catfile($swap_directory, $swap_filename);
+        say File::Spec->catfile($swap_directory, $swap_filename), ' ', $original_filename;
     }
 }
 close $pipe;
