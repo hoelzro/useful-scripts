@@ -13,7 +13,7 @@ end
 for c in iterate(match_firefox, 1, nil) do
   if not string.find(c.name, 'Private Browsing') then
     jumpto(c)
+    break
   end
-  break
 end
 END_LUA
