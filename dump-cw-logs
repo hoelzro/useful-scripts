@@ -1,0 +1,72 @@
+#!/usr/bin/env python
+
+from datetime import datetime
+import sys
+
+from dateutil.parser import parse as parse_date
+import boto3
+
+def list_log_groups(logs):
+    groups = logs.describe_log_groups()
+    assert len(groups['logGroups']) < 50, "I wasn't programmed to handle too many log groups!"
+    for group in groups['logGroups']:
+        print(group['logGroupName'])
+
+def dump_logs(logs, log_group, start_time, end_time):
+    start_time = int(parse_date(start_time).timestamp() * 1000)
+    end_time = int(parse_date(end_time).timestamp() * 1000)
+    streams_to_check = []
+    streams = logs.describe_log_streams(
+        logGroupName=log_group)
+
+    while True:
+        for stream in streams['logStreams']:
+            if 'firstEventTimestamp' not in stream:
+                continue
+
+            if stream['lastEventTimestamp'] < start_time:
+                continue
+            if stream['firstEventTimestamp'] > end_time:
+                continue
+            streams_to_check.append(stream['logStreamName'])
+
+        if 'nextToken' in streams:
+            streams = logs.describe_log_streams(
+                logGroupName=log_group,
+                nextToken=streams['nextToken'])
+        else:
+            break
+
+    for log_stream in streams_to_check:
+
+        events = logs.get_log_events(
+            logGroupName=log_group,
+            logStreamName=log_stream,
+            startTime=start_time,
+            endTime=end_time,
+            startFromHead=True)
+        while events['events']:
+            for event in events['events']:
+                event_date = datetime.fromtimestamp(event['timestamp'] // 1000).strftime('%F %T')
+                event_message = event['message'].strip()
+                print(f'{event_date} {event_message}')
+
+            events = logs.get_log_events(
+                logGroupName=log_group,
+                logStreamName=log_stream,
+                startTime=start_time,
+                endTime=end_time,
+                nextToken=events['nextForwardToken'],
+                startFromHead=True)
+
+logs = boto3.client('logs')
+
+if len(sys.argv) == 1:
+    list_log_groups(logs)
+elif len(sys.argv) == 4:
+    dump_logs(logs, *sys.argv[1:])
+else:
+    print('''
+usage: dump-cw-logs # list log groups
+     : dump-cw-logs [log group] [start date] [end date] # dump log entries
+    ''')
