@@ -1,0 +1,5 @@
+#!/bin/bash
+
+host=$1
+
+echo '' | openssl s_client -servername $host -connect ${host}:443 | perl -ne 'print if /BEGIN CERT/../END CERT/'  | openssl x509 -text
