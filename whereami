@@ -1,0 +1,3 @@
+#!/bin/bash
+
+curl -s ipinfo.io | jq -r '.ip + " " + .city + ", " + .region'
