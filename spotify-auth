@@ -1,0 +1,116 @@
+#!/usr/bin/env perl
+
+use autodie;
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+use Browser::Open qw(open_browser);
+use Mojolicious::Lite;
+use Mojo::Server::Daemon;
+use Mojo::UserAgent;
+use URL::Encode qw(url_encode);
+
+sub usage {
+    print STDERR <<"END_USAGE";
+usage: $0 [scope...]
+
+Goes through the authorization code flow (https://developer.spotify.com/web-api/authorization-guide/#authorization-code-flow)
+and generates shell commands to export SPOTIFY_REFRESH_TOKEN and SPOTIFY_ACCESS_TOKEN into a shell
+environment.  If SPOTIFY_REFRESH_TOKEN is already present in your environment, an attempt to refresh is made.
+
+Requires SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET to be set as environment
+variables, and for the app associated with those IDs to allow http://localhost:8888/
+as a valid callback.
+
+END_USAGE
+    exit;
+}
+
+# XXX what happens if we deny the request?
+sub authorize_app(@scopes) {
+    my ( $read_code, $write_code );
+
+    pipe $read_code, $write_code;
+
+    get '/' => sub {
+        my ( $c ) = @_;
+        say { $write_code } $c->param('code');
+        close $write_code;
+        $c->render(text => 'OK');
+    };
+
+    my $pid = fork();
+
+    if($pid == 0) {
+        close $read_code;
+
+        open STDOUT, '>', '/dev/null';
+        open STDERR, '>', '/dev/null';
+
+        my $daemon = Mojo::Server::Daemon->new(listen => ['http://127.0.0.1:8888']);
+        $daemon->app(app);
+        $daemon->run;
+    }
+
+    close $write_code;
+
+    my $scope = join(' ', @scopes);
+    my $redirect_uri = url_encode('http://localhost:8888/');
+    open_browser "https://accounts.spotify.com/authorize?client_id=$ENV{'SPOTIFY_CLIENT_ID'}&response_type=code&redirect_uri=$redirect_uri&scope=$scope";
+
+    my $code = <$read_code>;
+    chomp $code;
+    close $read_code;
+
+    kill TERM => $pid;
+    waitpid $pid, 0;
+
+    return $code;
+}
+
+if(grep { $_ eq '-h' || $_ eq '--help' } @ARGV) {
+    usage();
+}
+
+unless($ENV{'SPOTIFY_CLIENT_ID'} && $ENV{'SPOTIFY_CLIENT_SECRET'}) {
+    say STDERR "SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set in your environment";
+    usage();
+}
+
+my @scopes = @ARGV;
+
+say STDERR "make sure http://localhost:8888/ is a valid callback URL in your app's settings!";
+
+my $code = $ENV{'SPOTIFY_REFRESH_TOKEN'};
+my $is_refreshing = 1;
+
+if(!$code) {
+    $code = authorize_app(@scopes);
+    $is_refreshing = 0;
+}
+
+my $ua = Mojo::UserAgent->new;
+
+my $res;
+if($is_refreshing) {
+    my $basic_auth = join(':', $ENV{'SPOTIFY_CLIENT_ID'}, $ENV{'SPOTIFY_CLIENT_SECRET'});
+
+    $res = $ua->post("https://$basic_auth\@accounts.spotify.com/api/token", form => {
+        grant_type    => 'refresh_token',
+        refresh_token => $code,
+    })->res;
+} else {
+    $res = $ua->post('https://accounts.spotify.com/api/token', form => {
+        client_id     => $ENV{'SPOTIFY_CLIENT_ID'},
+        client_secret => $ENV{'SPOTIFY_CLIENT_SECRET'},
+        grant_type    => 'authorization_code',
+        code          => $code,
+        redirect_uri  => 'http://localhost:8888/',
+    })->res;
+}
+if($res->json->{'refresh_token'}) {
+    say 'export SPOTIFY_REFRESH_TOKEN=' . $res->json->{'refresh_token'};
+}
+say 'export SPOTIFY_ACCESS_TOKEN=' . $res->json->{'access_token'};
