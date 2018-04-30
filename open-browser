@@ -10,10 +10,13 @@ local function match_firefox(c)
   return r_match(c, { class = 'Firefox' })
 end
 
+local lowest_window = nil
 for c in iterate(match_firefox, 1, nil) do
   if not string.find(c.name, 'Private Browsing') then
-    jumpto(c)
-    break
+    if not lowest_window or c.window < lowest_window.window then
+      lowest_window = c
+    end
   end
 end
+jumpto(lowest_window)
 END_LUA
