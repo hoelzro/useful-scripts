@@ -1,0 +1,25 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+
+use Getopt::Long;
+
+my @selection;
+
+Getopt::Long::Configure 'bundling_values';
+
+GetOptions(
+    'f=s@' => \@selection,
+) or die "usage: $0 [-f fields] files...";
+
+@selection = map { $_ - 1 } map { split /\s*,\s*/, $_ } @selection;
+
+die "At least one field is required" unless @selection;
+
+while(<>) {
+    my @fields = split;
+
+    say join("\t", @fields[@selection]);
+}
