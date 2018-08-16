@@ -6,6 +6,7 @@ use warnings;
 use feature qw(say);
 use experimental qw(signatures);
 
+use Cwd ();
 use File::Spec;
 use File::stat;
 use File::Slurper qw(read_dir read_lines);
@@ -74,12 +75,18 @@ sub find_process_start_time($pid) {
     return stat("/proc/$pid")->mtime;
 }
 
+sub find_working_directory($pid) {
+    return readlink("/proc/$pid/cwd");
+}
+
 die "Usage: $0 [pid]\n" unless @ARGV;
 
 my ( $pid ) = @ARGV;
 
 my @command_line = read_command_line($pid);
+my $wd = find_working_directory($pid);
 my @args = find_arguments(@command_line);
+@args = map { Cwd::realpath(File::Spec->rel2abs($_, $wd)) } @args;
 my @arg_sizes = map { -s } @args;
 my @cum_sizes = cumsum(@arg_sizes);
 my $total = $cum_sizes[-1];
