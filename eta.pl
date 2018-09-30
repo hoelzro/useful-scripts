@@ -126,7 +126,8 @@ while(process_is_running($pid)) {
 
     do {
         local $| = 1;
-        print "\e[u\e[2KETA: $time_left";
+        my $percent_complete = sprintf('%.2f%%', 100 * $total_progress / $total);
+        print "\e[u\e[2K$percent_complete ETA: $time_left";
     };
 
     sleep 1;
