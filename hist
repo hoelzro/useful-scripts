@@ -1,0 +1,67 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+
+use Encode qw(encode_utf8);
+use List::Util qw(min max);
+use POSIX qw(floor);
+use Term::Size;
+
+my $BAR_CHAR = "\N{BLACK SQUARE}";
+
+my $num_buckets = 10; # XXX hardcoded
+
+my @values = <>;
+chomp @values;
+
+my $min_value = min(@values);
+my $max_value = max(@values);
+
+my $bucket_size = ($max_value - $min_value) / $num_buckets;
+
+my @buckets = (0) x $num_buckets;
+
+my $prefix_length = 0;
+
+for my $i (0..$num_buckets-1) {
+    # XXX duplication
+    my $bucket_start = $min_value + $bucket_size * $i;
+    my $bucket_end = $min_value + $bucket_size * ($i + 1);
+
+    for my $value (@values) {
+        next unless defined($value);
+
+        if($value >= $bucket_start && $value <= $bucket_end) {
+            $value = undef;
+            $buckets[$i]++;
+        }
+    }
+
+    # XXX duplication
+    $prefix_length = max($prefix_length,
+        length(sprintf("%.3f - %.3f", $bucket_start, $bucket_end)));
+}
+
+my ( $term_width, undef ) = Term::Size::chars(*STDOUT{IO});
+my $bar_space = $term_width - $prefix_length - 1;
+
+my $max_bar_chars = max(@buckets);
+
+if($max_bar_chars > $bar_space) {
+    my $scale_factor = $bar_space / $max_bar_chars;
+
+    @buckets = map { floor($_ * $scale_factor) } @buckets;
+}
+
+for my $i (0..$num_buckets-1) {
+    my $bucket_start = $min_value + $bucket_size * $i;
+    my $bucket_end = $min_value + $bucket_size * ($i + 1);
+
+    my $bar_chars = $BAR_CHAR x $buckets[$i];
+
+    printf "%${prefix_length}s %s\n",
+        sprintf("%.3f - %.3f", $bucket_start, $bucket_end),
+        encode_utf8($bar_chars);
+}
