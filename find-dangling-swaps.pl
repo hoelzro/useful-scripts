@@ -57,7 +57,7 @@ my $pid_re = qr{
         still \s+ running
         \)
     )
-}x;
+}xi;
 
 my $swap_directory;
 my $swap_filename;
