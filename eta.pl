@@ -1,5 +1,9 @@
 #!/usr/bin/env perl
 
+my $my_start_time;
+
+BEGIN { $my_start_time = time }
+
 use autodie;
 use strict;
 use warnings;
@@ -12,6 +16,7 @@ use File::stat;
 use File::Slurper qw(read_dir read_lines);
 use List::Util qw(sum);
 use Number::Format qw(format_bytes);
+use POSIX qw(sysconf _SC_CLK_TCK);
 
 sub read_command_line($pid) {
     my ( $line ) = read_lines("/proc/$pid/cmdline");
@@ -71,8 +76,25 @@ sub read_progress($pid, $fd) {
     return;
 }
 
+sub read_proc_start_time($pid) {
+    open my $fh, '<', "/proc/$pid/stat";
+    my $line = <$fh>;
+    close $fh;
+
+    chomp $line;
+    my @fields = split /\s+/, $line; # XXX doesn't handle comm super well
+
+    my $start_time_in_clock_ticks = $fields[21];
+
+    return $start_time_in_clock_ticks;
+}
+
 sub find_process_start_time($pid) {
-    return stat("/proc/$pid")->mtime;
+    my $my_clock_ticks   = read_proc_start_time($$);
+    my $pid_clock_ticks  = read_proc_start_time($pid);
+    my $ticks_per_second = sysconf(_SC_CLK_TCK);
+
+    return do { use integer; $my_start_time + ($pid_clock_ticks - $my_clock_ticks) / $ticks_per_second };
 }
 
 sub find_working_directory($pid) {
