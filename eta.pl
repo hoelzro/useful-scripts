@@ -77,12 +77,19 @@ sub read_progress($pid, $fd) {
 }
 
 sub read_proc_start_time($pid) {
-    open my $fh, '<', "/proc/$pid/stat";
+    open my $fh, '<', "/proc/$pid/comm";
+    my $comm = <$fh>;
+    chomp $comm;
+    close $fh;
+
+    open $fh, '<', "/proc/$pid/stat";
     my $line = <$fh>;
     close $fh;
 
     chomp $line;
-    my @fields = split /\s+/, $line; # XXX doesn't handle comm super well
+    $comm = quotemeta($comm);
+    $line =~ s/\($comm\)/placeholder/;
+    my @fields = split /\s+/, $line;
 
     my $start_time_in_clock_ticks = $fields[21];
 
