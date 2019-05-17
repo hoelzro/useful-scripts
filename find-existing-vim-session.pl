@@ -209,7 +209,9 @@ if($tmux) {
         attach_tmux_pane($session, $window, $pane);
     }
 } elsif($windowid) {
-    if($goto) {
+    if($windowid == ($ENV{'WINDOWID'} // 0)) {
+        say $owner; # pass owner PID up to zsh
+    } elsif($goto) {
         goto_window($windowid);
     } else {
         bring_window_here($windowid);
