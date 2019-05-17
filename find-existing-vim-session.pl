@@ -38,7 +38,7 @@ sub find_owner_pid {
             undef $current_filename;
         } elsif(/^\s*file\s+name:\s*(?<filename>.*)/) {
             $current_filename = expand_tilde($+{'filename'});
-        } elsif(/^\s*process\s+ID:\s*(?<pid>\d+)\s+\(still running\)/) {
+        } elsif(/^\s*process\s+ID:\s*(?<pid>\d+)\s+\(still running\)/i) {
             $filename_to_pid{$current_filename} = $+{'pid'};
         }
     }
