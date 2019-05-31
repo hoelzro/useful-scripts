@@ -1,0 +1,3 @@
+#!/bin/bash
+
+vim -c ":help $1 | :tabonly"
