@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export SQLITE_HISTORY=$HOME/.fxsql_history
+
 filename=$(mktemp)
 cp ~/.mozilla/firefox/*.default/places.sqlite "$filename"
 sqlite3 -readonly "$filename" "$@"
