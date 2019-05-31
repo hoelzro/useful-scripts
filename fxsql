@@ -1,0 +1,6 @@
+#!/bin/bash
+
+filename=$(mktemp)
+cp ~/.mozilla/firefox/*.default/places.sqlite "$filename"
+sqlite3 -readonly "$filename" "$@"
+rm "$filename"
