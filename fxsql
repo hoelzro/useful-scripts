@@ -2,7 +2,7 @@
 
 export SQLITE_HISTORY=$HOME/.fxsql_history
 
-filename=$(mktemp)
+filename=$(mktemp ${TMPDIR:-/tmp}/fxsql-db.XXXXXX)
 cp ~/.mozilla/firefox/*.default/places.sqlite "$filename"
 sqlite3 -readonly "$filename" "$@"
 rm "$filename"
