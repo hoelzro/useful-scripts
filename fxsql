@@ -2,8 +2,7 @@
 
 export SQLITE_HISTORY=$HOME/.fxsql_history
 
-filename=$(mktemp ${TMPDIR:-/tmp}/fxsql-db.XXXXXX)
-cp ~/.mozilla/firefox/*.default/places.sqlite "$filename"
+filename=$(echo ~/.mozilla/firefox/*.default/places.sqlite)
 
 sqliterc=$(mktemp ${TMPDIR:-/tmp}/fxsql-init.XXXXXX)
 cat <<END_SQLITERC > "$sqliterc"
@@ -14,5 +13,5 @@ CREATE TEMPORARY VIEW v AS
   ORDER BY hv.visit_date
 END_SQLITERC
 
-sqlite3 -init "$sqliterc" -readonly "$filename" "$@"
-rm "$filename" "$sqliterc"
+sqlite3 -init "$sqliterc" "file:$filename?immutable=1" "$@"
+rm "$sqliterc"
