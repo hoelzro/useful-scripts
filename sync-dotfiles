@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -e -u
+
+sync_file=$HOME/.cache/dotfiles-sync
+
+if [[ -e $sync_file ]] ; then
+    last_fetch=$(cat $sync_file)
+else
+    last_fetch=0
+fi
+
+time_since_last_fetch=$(( $(date +'%s') - $last_fetch ))
+
+touch $sync_file
+
+if [[ $time_since_last_fetch -gt 86400 ]] ; then
+    for dir in ~/.vim ~/.config/awesome ~/.zsh-scripts/ ~/projects/dotfiles ; do
+      git -C $dir fetch
+    done
+
+    date +'%s' > $sync_file
+fi
