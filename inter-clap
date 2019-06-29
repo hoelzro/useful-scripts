@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use charnames ':full';
+use utf8;
+
+use Encode qw(encode_utf8);
+
+say encode_utf8(join(" \N{CLAPPING HANDS SIGN} ", @ARGV));
