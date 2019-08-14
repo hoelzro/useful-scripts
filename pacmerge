@@ -1,0 +1,116 @@
+#!/usr/bin/env perl
+
+use autodie;
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+use File::Basename qw(basename);
+use File::Spec;
+use Mojo::UserAgent;
+use Mojo::Util qw(url_escape);
+
+die "usage: $0 [filename]\n" unless @ARGV;
+
+my ( $filename ) = @ARGV;
+
+my $pacnew_file = $filename;
+
+$filename =~ s/[.]pacnew$//;
+
+if($pacnew_file eq $filename) {
+    die "$pacnew_file doesn't look like a pacnew file\n";
+}
+
+unless(File::Spec->file_name_is_absolute($pacnew_file)) {
+    die "$pacnew_file doesn't look like an absolute path\n";
+}
+
+my $owner = qx(pacman --query --owns $filename);
+chomp $owner;
+
+unless($owner =~ /is owned by (\S+)/) {
+    die "'$owner' didn't match expected pattern\n";
+}
+
+$owner = $1;
+
+my $previous_version;
+
+open my $fh, '<', '/var/log/pacman.log';
+while(<$fh>) {
+    chomp;
+
+    if(/upgraded \Q$owner\E \((\S+) -> \S+\)/) {
+        $previous_version = $1;
+    }
+}
+
+close $fh;
+
+unless(defined $previous_version) {
+    die "No previous version found for package '$owner'\n";
+}
+
+my ( $owner_first_letter ) = $owner =~ /^(.)/;
+
+my $expected_package_name = url_escape("$owner-$previous_version");
+
+my $package_filename;
+
+do {
+    no autodie 'opendir';
+
+    if(opendir(my $dh, '/tmp/pacmerge/')) {
+        for my $filename (readdir $dh) {
+            if($filename =~ /^$expected_package_name-x86_64[.]pkg[.]tar[.]/) {
+                $package_filename = $filename;
+                last;
+            }
+        }
+        closedir $dh;
+    }
+};
+
+if(!$package_filename) {
+    # XXX check pacman cache directory?
+    my $ua = Mojo::UserAgent->new;
+    my $package_directory_url = "https://archive.archlinux.org/packages/$owner_first_letter/$owner/";
+    my $package_directory_dom = $ua->get($package_directory_url)->res->dom;
+
+    my @package_links = @{ $package_directory_dom->find('a')->map(attr => 'href') };
+
+    my $correct_package_link;
+
+    for my $link (@package_links) {
+        if($link =~ /[.]sig$/) {
+            next;
+        }
+
+        if($link =~ /^$expected_package_name-x86_64[.]pkg[.]tar[.]/) {
+            $correct_package_link = $link;
+            last;
+        }
+    }
+
+    unless(defined $correct_package_link) {
+        die "Could not find $owner version $previous_version on archive.archlinux.org - perhaps it's too old?\n";
+    }
+
+    $package_filename = $correct_package_link;
+    $correct_package_link = "https://archive.archlinux.org/packages/$owner_first_letter/$owner/$package_filename";
+
+    unless(-d '/tmp/pacmerge') {
+        mkdir '/tmp/pacmerge';
+    }
+
+    system 'curl', '-Lso', "/tmp/pacmerge/$package_filename", $correct_package_link;
+}
+
+my $num_slashes = () = $pacnew_file =~ m{/}g;
+
+system 'tar', '-C', '/tmp/pacmerge/', '--strip-components=' . ($num_slashes - 1), '--extract', '-f', "/tmp/pacmerge/$package_filename", ($filename =~ s{^/}{}r);
+
+# XXX use sudo -e?
+system 'sudo', 'vimdiff', $filename, "/tmp/pacmerge/" . basename($filename), $pacnew_file;
