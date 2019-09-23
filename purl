@@ -1,0 +1,3 @@
+#!/bin/bash
+
+perl -MMojo::URL -nle "my \$u = Mojo::URL->new(\$_); $1"
