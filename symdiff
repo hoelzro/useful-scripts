@@ -1,0 +1,3 @@
+#!/bin/bash
+
+diff --old-line-format='- %L' --new-line-format='+ %L' --unchanged-line-format='' <(cat "$1" | sort | uniq) <(cat "$2" | sort | uniq)
