@@ -2,20 +2,26 @@
 
 firefox "$1" &
 cat <<END_LUA | awesome-client
-local r_match_any = require('awful.rules').match_any
-local iterate = require('awful.client').iterate
+local ok, err = xpcall(function()
+  local r_match_any = require('awful.rules').match_any
+  local iterate = require('awful.client').iterate
 
-local function match_firefox(c)
-  return r_match_any(c, { class = {'firefox', 'Firefox'} })
-end
+  local function match_firefox(c)
+    return r_match_any(c, { class = {'firefox', 'Firefox'} })
+  end
 
-local lowest_window = nil
-for c in iterate(match_firefox, 1, nil) do
-  if not string.find(c.name, 'Private Browsing') then
-    if not lowest_window or c.window < lowest_window.window then
-      lowest_window = c
+  local lowest_window = nil
+  for c in iterate(match_firefox, 1, nil) do
+    if not string.find(c.name, 'Private Browsing') then
+      if not lowest_window or c.window < lowest_window.window then
+        lowest_window = c
+      end
     end
   end
+  lowest_window:jump_to()
+end, debug.traceback)
+
+if not ok then
+  alert(err)
 end
-lowest_window:jump_to()
 END_LUA
