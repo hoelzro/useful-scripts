@@ -2,12 +2,12 @@
 
 firefox "$1" &
 cat <<END_LUA | awesome-client
-local r_match = require('awful.rules').match
+local r_match_any = require('awful.rules').match_any
 local iterate = require('awful.client').iterate
 local jumpto  = require('awful.client').jumpto
 
 local function match_firefox(c)
-  return r_match(c, { class = 'Firefox' })
+  return r_match_any(c, { class = {'firefox', 'Firefox'} })
 end
 
 local lowest_window = nil
