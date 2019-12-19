@@ -1,0 +1,58 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+use JSON qw(decode_json);
+
+my %exceptions = (
+    SecurityGroups           => 'GroupName',
+    LoadBalancerDescriptions => 'LoadBalancerName',
+    SecretList               => 'Name',
+);
+
+my $json = do {
+    local $/;
+    <>
+};
+
+my $doc = decode_json($json);
+
+my ( $key ) = keys(%$doc);
+
+my $items = $doc->{$key};
+
+if($key eq 'Reservations') {
+    $key = 'Instances';
+    @$items = map { @{ $_->{'Instances'} } } @$items;
+}
+
+my $name_key_prefix = $key;
+$name_key_prefix =~ s/ies$/ys/;
+$name_key_prefix =~ s/s$//;
+
+exit unless @$items;
+
+my $name_key;
+
+if(!($name_key = $exceptions{$key})) {
+    my @item_keys = keys(%{ $items->[0] });
+
+    my @name_keys = grep { /^${name_key_prefix}name$/i || /^${name_key_prefix}id$/i || /^${name_key_prefix}identifier$/i } @item_keys;
+
+    if(@name_keys > 1) {
+        @name_keys = sort @name_keys;
+        local $" = ' ';
+        die "Ambiguous name keys: @name_keys";
+    } elsif(@name_keys == 0) {
+        die "Unable to determine name key for $key";
+    }
+
+    ( $name_key ) = @name_keys;
+}
+
+for my $item (@$items) {
+    say $item->{$name_key};
+}
