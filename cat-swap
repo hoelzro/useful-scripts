@@ -1,0 +1,6 @@
+#!/bin/bash
+
+tmpnam=$(mktemp)
+echo '' | vim --not-a-term -r "$1" -u NONE -c ":wq! $tmpnam" &>/dev/null
+cat "$tmpnam"
+rm "$tmpnam"
