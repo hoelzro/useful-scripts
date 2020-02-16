@@ -1,0 +1,46 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+use utf8;
+
+use Term::ANSIColor qw(colored);
+
+my @COLORS = qw(on_yellow on_green on_blue on_red on_cyan on_magenta on_white);
+
+die "usage: $0 [term]...\n" unless @ARGV;
+
+my @terms = @ARGV;
+
+die "Too many search terms, not enough colors!\n" if @terms > @COLORS;
+
+@ARGV = ();
+
+my $re = join('|', map { "((?^n:$_))" } @terms);
+$re = qr/$re/;
+
+while(<>) {
+    chomp;
+
+    while(/$re/g) {
+        my $orig_len = length();
+
+        # XXX shouldn't you be sorting based on the actual values of @-?
+        for my $i (reverse(1..$#-)) {
+            my $color = $COLORS[$i - 1];
+            my $start = $-[$i];
+            my $end   = $+[$i];
+
+            next unless defined($start) && defined($end);
+
+            substr($_, $start, $end - $start) = colored(['black', $color], substr($_, $start, $end - $start));
+        }
+
+        my $Δ_len = length() - $orig_len;
+        pos() = $+[0] + $Δ_len;
+    }
+
+    say;
+}
