@@ -1,0 +1,26 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+die "usage: $0 [regex]\n" unless @ARGV;
+
+# XXX supporting things like fields (ala cut/scut) or named patterns (ala RPL) would be nifty!
+#     adding a space every N lines would also be nice
+
+my $regex = shift @ARGV;
+$regex = qr/$regex/;
+
+my $prev_one;
+
+while(<>) {
+    chomp;
+
+    /$regex/;
+    say '' if defined($prev_one) && $prev_one ne $1;
+    say;
+
+    $prev_one = $1;
+}
