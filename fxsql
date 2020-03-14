@@ -13,5 +13,5 @@ CREATE TEMPORARY VIEW v AS
   ORDER BY hv.visit_date
 END_SQLITERC
 
-sqlite3 -init "$sqliterc" "file:$filename?immutable=1" "$@"
+sqlite3 -batch -init "$sqliterc" "file:$filename?immutable=1" "$@"
 rm "$sqliterc"
