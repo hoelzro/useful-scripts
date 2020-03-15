@@ -1,11 +1,14 @@
 #!/bin/bash
 
 export SQLITE_HISTORY=$HOME/.fxsql_history
+export LD_LIBRARY_PATH=$HOME/.fxsql_extensions/
 
 filename=$(echo ~/.mozilla/firefox/*.default/places.sqlite)
 
 sqliterc=$(mktemp ${TMPDIR:-/tmp}/fxsql-init.XXXXXX)
 cat <<END_SQLITERC > "$sqliterc"
+.load url
+
 CREATE TEMPORARY VIEW v AS
   SELECT DATETIME(hv.visit_date / 1000000, 'unixepoch', 'localtime') AS visit_date, p.title, p.url FROM moz_places AS p
   INNER JOIN moz_historyvisits AS hv
