@@ -1,4 +1,14 @@
 #!/bin/bash
 
-page=$(perl -a -F'/\0/' -n -E 'say $F[-1]' /proc/$PPID/cmdline)
-sed -e 's/\x1b\[[^m]*m//g' $1 | col -b | vim -c "set ft=man noswf noma nomod nolist ignorecase title titlestring=man\ $page" -
+if [[ "$(basename $(readlink /proc/$PPID/exe))" == 'man' ]]; then
+    title=man\ $(perl -F'/\0/' -anle 'print($F[-1] =~ s/\x27//gr)' /proc/$PPID/cmdline)
+else
+    gppid=$(perl -nle 'print $1 if /^PPid:\s*(\d+)/' /proc/$PPID/status)
+    if [[ "$(cat /proc/$gppid/comm)" == 'perldoc' ]]; then
+        title=perldoc\ $(perl -F'/\0/' -anle 'print($F[-1] =~ s/\x27//gr)' /proc/$gppid/cmdline)
+    else
+        title=''
+    fi
+fi
+
+sed -e 's/\x1b\[[^m]*m//g' $1 | col -b | vim -c "set ft=man noswf noma nomod nolist ignorecase title | let &titlestring='$title'" -
