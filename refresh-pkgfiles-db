@@ -1,0 +1,34 @@
+#!/bin/bash
+
+set -e
+
+pkgfiles_db=$HOME/.cache/pkgfiles.db
+
+pkgfiles_mtime=0
+
+if [[ -e "$pkgfiles_db" ]] ; then
+  pkgfiles_mtime=$(stat -c '%Y' "$pkgfiles_db")
+fi
+
+are_any_files_newer=0
+
+# XXX this doesn't work if you enable a new repo
+for file in /var/lib/pacman/sync/*.files ; do
+  file_mtime=$(stat -c '%Y' "$file")
+  if [[ $file_mtime -ge $pkgfiles_mtime ]] ; then
+    are_any_files_newer=1
+  fi
+done
+
+if [[ $are_any_files_newer -eq 0 ]] ; then
+  exit
+fi
+
+(
+    echo "create table if not exists package_binaries (exe_name text not null, path not null, package_name text not null);";
+    echo "create index exe_name_idx on package_binaries (exe_name);"
+    echo "begin;"
+    echo "delete from package_binaries;"
+    pacman --files --list --machinereadable | perl -F'\0' -anle $'my ( $repo, $pkgname, $pkgvers, $path ) = @F; next unless $path =~ m{/bin/([^/]+)$}; my $exe_name = $1; print "INSERT INTO package_binaries VALUES (\'$exe_name\', \'/$path\', \'$pkgname\');"'
+    echo "commit;"
+) | sqlite3 -batch "$pkgfiles_db"
