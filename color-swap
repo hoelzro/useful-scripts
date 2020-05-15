@@ -1,0 +1,14 @@
+#!/bin/bash
+
+echo -e "\e]10;?\a"
+
+read -s -d "" current_fg_seq
+
+if [[ "${current_fg_seq:5:18}" == "rgb:d300/da00/e300" ]]; then
+  # currently dark
+  echo -n -e "\e]10;rgb:3800/3c00/4a00\a"
+  echo -n -e "\e]11;rgb:d300/da00/e300\a"
+else
+  echo -n -e "\e]10;rgb:d300/da00/e300\a"
+  echo -n -e "\e]11;rgb:3800/3c00/4a00\a"
+fi
