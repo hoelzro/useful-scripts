@@ -13,5 +13,5 @@ exit unless $title;
 if($ENV{'TMUX'}) {
     print "\ek$title\e\\";
 } else {
-    print "\e]2;$title\a";
+    print "\e]0;$title\a";
 }
