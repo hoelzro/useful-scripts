@@ -1,0 +1,68 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+
+use FindBin;
+use DBI;
+use List::Util qw(max);
+
+unless(@ARGV) {
+    my ( undef, undef, undef, $day, $month, $year ) = localtime;
+
+    $month++;
+    $year += 1_900;
+
+    @ARGV = (sprintf('%04d-%02d-%02d', $year, $month, $day));
+}
+
+my %sessions;
+
+for my $date (@ARGV) {
+    my $db_filename = "$ENV{'HOME'}/.zsh_history.d/$date.db";
+
+    my $dbh = DBI->connect('dbi:SQLite:dbname=' . $db_filename, undef, undef, {
+        RaiseError => 1,
+        PrintError => 0,
+    });
+
+    my $sth = do {
+        local $dbh->{'RaiseError'} = 0;
+
+        $dbh->prepare('SELECT session_id, timestamp, cwd, entry, exit_status FROM history')
+    };
+
+    unless($sth) {
+        if($dbh->errstr =~ /no such table/) {
+            next;
+        }
+        die $dbh->errstr;
+    }
+
+    $sth->execute;
+
+    while(my ( $session_id, $timestamp, $cwd, $entry, $exit_status ) = $sth->fetchrow_array) {
+        push @{ $sessions{$session_id} }, [
+            $timestamp,
+            $cwd,
+            $entry,
+            $exit_status,
+        ];
+    }
+}
+
+for my $session_id (sort { $sessions{$a}[0] <=> $sessions{$b}[0] } keys(%sessions)) {
+    my $entries = $sessions{$session_id};
+    my $max_cwd_length = max(map { length($_->[1]) } @$entries);
+    my $format = "%d\t%-${max_cwd_length}s\t%s\t%s\n";
+
+    for my $event (@$entries) {
+        my ( $timestamp, $cwd, $entry, $status ) = @$event;
+        my ( $second, $minute, $hour ) = localtime($timestamp);
+        my $time = sprintf('%02d:%02d:%02d', $hour, $minute, $second);
+        $entry = "\e[31m$entry\e[0m" if $status != 0;
+        printf($format, $session_id, $cwd, $time, $entry);
+    }
+    say '';
+}
