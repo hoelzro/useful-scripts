@@ -1,0 +1,34 @@
+#!/bin/bash
+
+function format_delta() {
+    local seconds="$1"
+    local formatted=''
+
+    if [[ $seconds -ge 3600 ]] ; then
+        local hours=$(( $seconds / 3600 ))
+        seconds=$(( $seconds % 3600 ))
+        formatted="${formatted}${hours}h"
+    fi
+
+    if [[ $seconds -ge 60 ]] ; then
+        local minutes=$(( $seconds / 60 ))
+        seconds=$(( $seconds % 60 ))
+        formatted="${formatted}${minutes}m"
+    fi
+
+    if [[ $seconds -gt 0 ]] ; then
+        formatted="${formatted}${seconds}s"
+    fi
+    echo $formatted
+}
+
+date="$1"
+
+if [[ -z "$date" ]]; then
+  echo "usage: $0 [date]\n" >&2
+fi
+
+now_ts=$(date +'%s')
+date_ts=$(date -d "$date" +'%s')
+delta_seconds=$(( $now_ts - $date_ts ))
+format_delta $delta_seconds
