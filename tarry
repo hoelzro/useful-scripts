@@ -1,0 +1,76 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+sub parse_duration($s) {
+    my $orig_s = $s;
+
+    my $d = 0;
+
+    my @units = (
+        [d => 24 * 60 * 60],
+        [h => 60 * 60],
+        [m => 60],
+        [s => 1],
+    );
+
+    while($s ne '') {
+        my $made_progress;
+
+        for my $tuple (@units) {
+            my ( $unit_suffix, $mult ) = @$tuple;
+
+            if($s =~ s/^(\d+)$unit_suffix//) {
+                $made_progress = 1;
+                $d += $1 * $mult;
+            }
+        }
+
+        if(!$made_progress) {
+            if($s =~ /^\d+$/) {
+                $d += $s;
+                $s = '';
+            } else {
+                die "Invalid duration '$orig_s'";
+            }
+        }
+    }
+
+    return $d;
+}
+
+sub set_title($title) {
+    local $| = 1;
+
+    if($ENV{'TMUX'}) {
+        print "\ek$title\e\\";
+    } else {
+        print "\e]0;$title\a";
+    }
+}
+
+die "usage: $0 [duration]\n" unless @ARGV;
+
+my $duration = parse_duration($ARGV[0]);
+
+my $sleep_until = time + $duration;
+
+# XXX write ~/.cache/tarry/$$ with $sleep_until
+
+my ( $sec, $min, $hour ) = localtime($sleep_until);
+my $formatted_until = sprintf('%02d:%02d:%02d', $hour, $min, $sec);
+
+my $title = "sleeping until $formatted_until";
+set_title($title);
+
+sleep($duration);
+# XXX handle ctrl-c
+
+# XXX restore original title (alt. screen?)
+set_title('urxvt');
+print "\a";
+
+# XXX unlink ~/.cache/tarry/$$
