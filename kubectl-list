@@ -1,0 +1,88 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings qw(FATAL);
+use feature qw(say);
+use experimental 'signatures';
+
+my %CATEGORIES = (
+    all => sub ($name, $meta) { $name ne 'events' && $meta->{'namespaced'} && $meta->{'api_group'} ne 'external.metrics.k8s.io' && $name ne 'localsubjectaccessreviews' && $name ne 'bindings' },
+);
+
+my $category = shift @ARGV;
+
+if(!defined($category) || $category =~ /^-/) {
+    die "usage: kubectl list [category] [options]\n";
+}
+
+my %all_resources;
+
+# XXX support shortnames too
+# XXX can we leverage the discovery cache?
+# XXX ask the k8s server what it thinks wrt. categories? (way to fallback to *its* notion of "all")
+
+open my $pipe, '-|', 'kubectl', 'api-resources';
+
+my @column_sizes;
+
+while(<$pipe>) {
+    chomp;
+
+    if(!@column_sizes) {
+        while(/\G(?<column>(?<header>\S+)\s*)/g) {
+            push @column_sizes, length($+{'column'});
+        }
+        @column_sizes[$#column_sizes] = undef; # the last column has no trailing space, so it's just "the rest of the line"
+    } else {
+        my @columns;
+
+        my $offset = 0;
+        for my $size (@column_sizes) {
+            my $column;
+
+            if(defined($size)) {
+                $column = substr($_, $offset, $size);
+                $offset += $size;
+            } else {
+                $column = substr($_, $offset);
+            }
+
+            $column =~ s/\s*$//;
+
+            push @columns, $column;
+        }
+
+        my ( $name, $short_names, $api_group, $namespaced, $kind ) = @columns;
+        $all_resources{$name} = {
+            name        => $name,
+            short_names => [ split /,/, $short_names ],
+            api_group   => $api_group,
+            namespaced  => ($namespaced eq 'true' ? 1 : 0),
+            kind        => $kind,
+        };
+    }
+}
+close $pipe;
+
+my %selected_categories;
+
+my @categories = split /,/, $category;
+
+for my $category (@categories) {
+    my $inverted = $category =~ s/^-//;
+
+    my $predicate = $CATEGORIES{$category};
+    if(!$predicate) {
+        $predicate = sub($name, $meta) { $name eq $category };
+    }
+
+    my @selected = grep { $predicate->($_, $all_resources{$_}) } keys(%all_resources);
+
+    if($inverted) {
+        delete @selected_categories{@selected};
+    } else {
+        @selected_categories{@selected} = (1) x @selected;
+    }
+}
+
+exec 'kubectl', 'get', join(',', keys(%selected_categories)), @ARGV;
