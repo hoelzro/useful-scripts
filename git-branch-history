@@ -1,0 +1,29 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+my $REF_REGEX = qr/[^\t]+/; # XXX not exact, but good enough
+
+my %valid_refs;
+my $relative_position_counter = 0;
+
+open my $pipe, '-|', 'git', 'reflog', 'show', "--pretty=format:%ar\t%D\t%gs";
+while(<$pipe>) {
+    chomp;
+    my ( $relative_time, $comma_separated_refs, $reflog_subject ) = split /\t/, $_, 3;
+    $comma_separated_refs =~ s/^$REF_REGEX\s*->\s*//;
+
+    my @refs = split /\s*,\s*/, $comma_separated_refs;
+    @valid_refs{@refs} = (1) x @refs;
+
+    if(my ( $ref ) = ($reflog_subject =~ /checkout: moving from $REF_REGEX to ($REF_REGEX)/)) {
+        if($valid_refs{$ref} && $relative_position_counter > 0) {
+            say join("\t", $relative_time, $ref, "\@{-$relative_position_counter}");
+        }
+        $relative_position_counter++;
+    }
+}
+close $pipe;
