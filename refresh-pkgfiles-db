@@ -31,4 +31,4 @@ fi
     echo "delete from package_binaries;"
     pacman --files --list --machinereadable | perl -F'\0' -anle $'my ( $repo, $pkgname, $pkgvers, $path ) = @F; next unless $path =~ m{/bin/([^/]+)$}; my $exe_name = $1; print "INSERT INTO package_binaries VALUES (\'$exe_name\', \'/$path\', \'$pkgname\');"'
     echo "commit;"
-) | sqlite3 -batch "$pkgfiles_db"
+) | sqlite3 -init /dev/null -batch "$pkgfiles_db"
