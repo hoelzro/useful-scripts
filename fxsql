@@ -10,10 +10,18 @@ cat <<END_SQLITERC > "$sqliterc"
 .load url
 
 CREATE TEMPORARY VIEW v AS
-  SELECT DATETIME(hv.visit_date / 1000000, 'unixepoch', 'localtime') AS visit_date, p.title, p.url, DATE(hv.visit_date / 1000000, 'unixepoch', 'localtime') = DATE('now', 'localtime') AS today FROM moz_places AS p
+  SELECT DATETIME(hv.visit_date / 1000000, 'unixepoch', 'localtime') AS visit_date, p.title, p.url, DATE(hv.visit_date / 1000000, 'unixepoch', 'localtime') = DATE('now', 'localtime') AS today, hv.id AS visit_id FROM moz_places AS p
   INNER JOIN moz_historyvisits AS hv
   ON hv.place_id = p.id
-  ORDER BY hv.visit_date
+  ORDER BY hv.visit_date;
+
+CREATE TEMPORARY VIEW trails AS
+  WITH RECURSIVE t AS (
+      SELECT hv.id AS trail_head, hv.id, hv.from_visit, 0 AS depth FROM moz_historyvisits AS hv WHERE hv.from_visit = 0
+      UNION
+      SELECT t.trail_head, hv.id, hv.from_visit, t.depth + 1 AS depth FROM moz_historyvisits AS hv INNER JOIN t ON hv.from_visit = t.id
+  ) SELECT * FROM t;
+
 END_SQLITERC
 
 sqlite3 -batch -init "$sqliterc" "file:$filename?immutable=1" "$@"
