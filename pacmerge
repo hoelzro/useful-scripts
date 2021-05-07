@@ -112,5 +112,5 @@ my $num_slashes = () = $pacnew_file =~ m{/}g;
 
 system 'tar', '-C', '/tmp/pacmerge/', '--strip-components=' . ($num_slashes - 1), '--extract', '-f', "/tmp/pacmerge/$package_filename", ($filename =~ s{^/}{}r);
 
-# XXX use sudo -e?
-system 'sudo', 'vimdiff', $filename, "/tmp/pacmerge/" . basename($filename), $pacnew_file;
+local $ENV{'SUDO_EDITOR'} = 'vimdiff';
+system 'sudoedit', $filename, "/tmp/pacmerge/" . basename($filename), $pacnew_file;
