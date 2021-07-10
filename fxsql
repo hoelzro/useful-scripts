@@ -10,7 +10,10 @@ cat <<END_SQLITERC > "$sqliterc"
 .load url
 
 CREATE TEMPORARY VIEW v AS
-  SELECT DATETIME(hv.visit_date / 1000000, 'unixepoch', 'localtime') AS visit_date, p.title, p.url, DATE(hv.visit_date / 1000000, 'unixepoch', 'localtime') = DATE('now', 'localtime') AS today, hv.id AS visit_id FROM moz_places AS p
+  SELECT DATETIME(hv.visit_date / 1000000, 'unixepoch', 'localtime') AS visit_date, p.title, p.url,
+    DATE(hv.visit_date / 1000000, 'unixepoch', 'localtime') = DATE('now', 'localtime') AS today,
+    hv.id AS visit_id
+  FROM moz_places AS p
   INNER JOIN moz_historyvisits AS hv
   ON hv.place_id = p.id
   ORDER BY hv.visit_date;
