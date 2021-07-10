@@ -12,6 +12,9 @@ cat <<END_SQLITERC > "$sqliterc"
 CREATE TEMPORARY VIEW v AS
   SELECT DATETIME(hv.visit_date / 1000000, 'unixepoch', 'localtime') AS visit_date, p.title, p.url,
     DATE(hv.visit_date / 1000000, 'unixepoch', 'localtime') = DATE('now', 'localtime') AS today,
+    ((STRFTIME('%s', 'now') - (hv.visit_date / 1000000)) < (3600 * 24 * 1)) AS last_day,
+    ((STRFTIME('%s', 'now') - (hv.visit_date / 1000000)) < (3600 * 24 * 7)) AS last_week,
+    ((STRFTIME('%s', 'now') - (hv.visit_date / 1000000)) < (3600 * 24 * 365)) AS last_year,
     hv.id AS visit_id
   FROM moz_places AS p
   INNER JOIN moz_historyvisits AS hv
