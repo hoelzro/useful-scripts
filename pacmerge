@@ -52,7 +52,7 @@ def main(pacnew_file):
         xmllint.wait()
 
         if package_filename == '':
-            raise Exception(f"Count not find {owner} version {previous_version} on archive.archlinux.org - perhaps it's too old?")
+            raise Exception(f"Could not find {owner} version {previous_version} on archive.archlinux.org - perhaps it's too old?")
 
         package_link = f'https://archive.archlinux.org/packages/{owner[0]}/{owner}/{package_filename}'
         try:
