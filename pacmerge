@@ -1,116 +1,76 @@
-#!/usr/bin/env perl
+#!/usr/bin/env python
 
-use autodie;
-use strict;
-use warnings;
-use feature qw(say);
-use experimental qw(signatures);
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import urllib.parse
 
-use File::Basename qw(basename);
-use File::Spec;
-use Mojo::UserAgent;
-use Mojo::Util qw(url_escape);
+def main(pacnew_file):
+    filename = pacnew_file.removesuffix('.pacnew')
+    if filename == pacnew_file:
+        raise Exception(f"{pacnew_file} doesn't look like a pacnew file")
+    if not pathlib.Path(pacnew_file).is_absolute():
+        raise Exception(f"{pacnew_file} doesn't look like an absolute path")
 
-die "usage: $0 [filename]\n" unless @ARGV;
+    owner = subprocess.check_output(['pacman', '--query', '--owns', filename])
+    owner = owner.decode().rstrip()
+    if not (m := re.search(r'is owned by (\S+)', owner)):
+        raise Exception(f"{owner} didn't match expected pattern")
+    owner = m.group(1)
 
-my ( $filename ) = @ARGV;
+    previous_version = None
+    with open('/var/log/pacman.log', 'r') as pacman_log:
+        for line in pacman_log:
+            if m := re.search(fr'upgraded {re.escape(owner)} \((\S+) -> \S+\)', line):
+                previous_version = m.group(1)
+    if previous_version is None:
+        raise Exception(f'No previous version found for package {owner!r}')
 
-my $pacnew_file = $filename;
+    expected_package_name = urllib.parse.quote(f'{owner}-{previous_version}')
 
-$filename =~ s/[.]pacnew$//;
+    try:
+        package_filename = None
+        for package_file in pathlib.Path('/tmp/pacmerge').iterdir():
+            if package_file.name.startswith(f'{expected_package_name}-x86_64.pkg.tar.'):
+                package_filename = package_file.name
+                break
+    except FileNotFoundError:
+        pass
 
-if($pacnew_file eq $filename) {
-    die "$pacnew_file doesn't look like a pacnew file\n";
-}
+    if package_filename is None:
+        curl = subprocess.Popen(['curl', '-Ls', f'https://archive.archlinux.org/packages/{owner[0]}/{owner}/'], stdout=subprocess.PIPE)
+        tidy = subprocess.Popen(['tidy', '--output-xml', 'yes', '--show-warnings', 'no', '--show-info', 'no', '-quiet', '/dev/stdin'], stdin=curl.stdout, stdout=subprocess.PIPE)
+        xmllint = subprocess.Popen(['xmllint', '--xpath', "string(//a[starts-with(@href,'pulseaudio-14.2-3-') and substring(@href, string-length(@href) - 3) != '.sig']/@href)", '/dev/stdin'], stdin=tidy.stdout, stdout=subprocess.PIPE)
 
-unless(File::Spec->file_name_is_absolute($pacnew_file)) {
-    die "$pacnew_file doesn't look like an absolute path\n";
-}
+        package_filename, _ = xmllint.communicate()
+        package_filename = package_filename.decode().rstrip()
 
-my $owner = qx(pacman --query --owns $filename);
-chomp $owner;
+        curl.wait()
+        tidy.wait()
+        xmllint.wait()
 
-unless($owner =~ /is owned by (\S+)/) {
-    die "'$owner' didn't match expected pattern\n";
-}
+        if package_filename == '':
+            raise Exception(f"Count not find {owner} version {previous_version} on archive.archlinux.org - perhaps it's too old?")
 
-$owner = $1;
+        package_link = f'https://archive.archlinux.org/packages/{owner[0]}/{owner}/{package_filename}'
+        try:
+            os.mkdir('/tmp/pacmerge')
+        except FileExistsError:
+            pass
 
-my $previous_version;
+        subprocess.check_call(['curl', '-Lso', f'/tmp/pacmerge/{package_filename}', package_link])
 
-open my $fh, '<', '/var/log/pacman.log';
-while(<$fh>) {
-    chomp;
+    num_slashes = len([letter for letter in pacnew_file if letter == '/'])
+    subprocess.check_call(['tar', '-C', '/tmp/pacmerge/', f'--strip-components={num_slashes - 1}', '--extract', '-f', f'/tmp/pacmerge/{package_filename}', filename.removeprefix('/')])
 
-    if(/upgraded \Q$owner\E \((\S+) -> \S+\)/) {
-        $previous_version = $1;
-    }
-}
+    sudo_env = os.environ.copy()
+    sudo_env['SUDO_EDITOR'] = 'vimdiff'
+    subprocess.check_call(['sudoedit', filename, f'/tmp/pacmerge/{pathlib.Path(filename).name}', pacnew_file], env=sudo_env)
 
-close $fh;
-
-unless(defined $previous_version) {
-    die "No previous version found for package '$owner'\n";
-}
-
-my ( $owner_first_letter ) = $owner =~ /^(.)/;
-
-my $expected_package_name = url_escape("$owner-$previous_version");
-
-my $package_filename;
-
-do {
-    no autodie 'opendir';
-
-    if(opendir(my $dh, '/tmp/pacmerge/')) {
-        for my $filename (readdir $dh) {
-            if($filename =~ /^$expected_package_name-x86_64[.]pkg[.]tar[.]/) {
-                $package_filename = $filename;
-                last;
-            }
-        }
-        closedir $dh;
-    }
-};
-
-if(!$package_filename) {
-    # XXX check pacman cache directory?
-    my $ua = Mojo::UserAgent->new;
-    my $package_directory_url = "https://archive.archlinux.org/packages/$owner_first_letter/$owner/";
-    my $package_directory_dom = $ua->get($package_directory_url)->res->dom;
-
-    my @package_links = @{ $package_directory_dom->find('a')->map(attr => 'href') };
-
-    my $correct_package_link;
-
-    for my $link (@package_links) {
-        if($link =~ /[.]sig$/) {
-            next;
-        }
-
-        if($link =~ /^$expected_package_name-x86_64[.]pkg[.]tar[.]/) {
-            $correct_package_link = $link;
-            last;
-        }
-    }
-
-    unless(defined $correct_package_link) {
-        die "Could not find $owner version $previous_version on archive.archlinux.org - perhaps it's too old?\n";
-    }
-
-    $package_filename = $correct_package_link;
-    $correct_package_link = "https://archive.archlinux.org/packages/$owner_first_letter/$owner/$package_filename";
-
-    unless(-d '/tmp/pacmerge') {
-        mkdir '/tmp/pacmerge';
-    }
-
-    system 'curl', '-Lso', "/tmp/pacmerge/$package_filename", $correct_package_link;
-}
-
-my $num_slashes = () = $pacnew_file =~ m{/}g;
-
-system 'tar', '-C', '/tmp/pacmerge/', '--strip-components=' . ($num_slashes - 1), '--extract', '-f', "/tmp/pacmerge/$package_filename", ($filename =~ s{^/}{}r);
-
-local $ENV{'SUDO_EDITOR'} = 'vimdiff';
-system 'sudoedit', $filename, "/tmp/pacmerge/" . basename($filename), $pacnew_file;
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print(f'usage: {sys.argv[0]} [filename]', file=sys.stderr)
+        sys.exit(1)
+    main(*sys.argv[1:])
