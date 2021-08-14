@@ -42,7 +42,7 @@ def main(pacnew_file):
     if package_filename is None:
         curl = subprocess.Popen(['curl', '-Ls', f'https://archive.archlinux.org/packages/{owner[0]}/{owner}/'], stdout=subprocess.PIPE)
         tidy = subprocess.Popen(['tidy', '--output-xml', 'yes', '--show-warnings', 'no', '--show-info', 'no', '-quiet', '/dev/stdin'], stdin=curl.stdout, stdout=subprocess.PIPE)
-        xmllint = subprocess.Popen(['xmllint', '--xpath', "string(//a[starts-with(@href,'pulseaudio-14.2-3-') and substring(@href, string-length(@href) - 3) != '.sig']/@href)", '/dev/stdin'], stdin=tidy.stdout, stdout=subprocess.PIPE)
+        xmllint = subprocess.Popen(['xmllint', '--xpath', f"string(//a[starts-with(@href,'{owner}-{previous_version}-') and substring(@href, string-length(@href) - 3) != '.sig']/@href)", '/dev/stdin'], stdin=tidy.stdout, stdout=subprocess.PIPE)
 
         package_filename, _ = xmllint.communicate()
         package_filename = package_filename.decode().rstrip()
