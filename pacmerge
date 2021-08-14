@@ -66,8 +66,8 @@ def main(pacnew_file):
     subprocess.check_call(['tar', '-C', '/tmp/pacmerge/', f'--strip-components={num_slashes - 1}', '--extract', '-f', f'/tmp/pacmerge/{package_filename}', filename.removeprefix('/')])
 
     sudo_env = os.environ.copy()
-    sudo_env['SUDO_EDITOR'] = 'vimdiff'
-    subprocess.check_call(['sudoedit', filename, f'/tmp/pacmerge/{pathlib.Path(filename).name}', pacnew_file], env=sudo_env)
+    sudo_env['SUDO_EDITOR'] = f'vim -c "vertical diffsplit /tmp/pacmerge/{pathlib.Path(filename).name}" -c "vertical diffsplit #2"'
+    subprocess.check_call(['sudoedit', filename, pacnew_file], env=sudo_env)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
