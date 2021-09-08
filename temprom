@@ -21,7 +21,7 @@ scrape_configs:
 END_CONFIG
 
 cd /usr/share/prometheus/
-prometheus --web.listen-address="127.0.0.1:0" --config.file="$tempdir/prometheus.yml" --storage.tsdb.path="$tempdir/data" &>"$tempdir/prometheus.log" & PROM_PID=$!
+prometheus --web.listen-address="127.0.0.1:0" --web.enable-lifecycle --config.file="$tempdir/prometheus.yml" --storage.tsdb.path="$tempdir/data" &>"$tempdir/prometheus.log" & PROM_PID=$!
 
 sleep 1
 echo "listening on $(netstat -nltp 2>/dev/null | grep $PROM_PID | perl -anle 'print $F[3]') - logs are available in $tempdir/prometheus.log"
