@@ -61,7 +61,7 @@ for my $session_id (sort { $sessions{$a}[0] <=> $sessions{$b}[0] } keys(%session
         my ( $timestamp, $cwd, $entry, $status ) = @$event;
         my ( $second, $minute, $hour ) = localtime($timestamp);
         my $time = sprintf('%02d:%02d:%02d', $hour, $minute, $second);
-        $entry = "\e[31m$entry\e[0m" if $status != 0;
+        $entry = "\e[31m$entry\e[0m" if defined($status) && $status != 0;
         printf($format, $session_id, $cwd, $time, $entry);
     }
     say '';
