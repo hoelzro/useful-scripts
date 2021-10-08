@@ -1,0 +1,83 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+use List::Util qw(min);
+
+sub get_clients() {
+    my @clients;
+    my $current_client;
+    my $current_properties_indent;
+
+    open my $pipe, '-|', 'pacmd', 'list-clients';
+    while(<$pipe>) {
+        chomp;
+
+        if(/^\s*index:\s*(\d+)/) {
+            $current_properties_indent = undef;
+            $current_client = {
+                index => $1,
+            };
+            push @clients, $current_client;
+        } elsif(/^(\s+)properties:/) {
+            $current_properties_indent = length($1);
+        } elsif(defined($current_properties_indent) && /^(\s*)/ && length($1) <= $current_properties_indent) {
+            $current_properties_indent = undef;
+        } elsif(defined($current_properties_indent) && $current_client && /^\s*(?<key>\S+)\s*=\s*"(?<value>.*)"/) {
+            $current_client->{$+{'key'}} = $+{'value'};
+        }
+    }
+    close $pipe;
+
+    return @clients;
+}
+
+sub get_streams() {
+    my @streams;
+    my $current_stream;
+    my $current_properties_indent;
+
+    open my $pipe, '-|', 'pacmd', 'list-sink-inputs';
+    while(<$pipe>) {
+        chomp;
+
+        if(/^\s*index:\s*(\d+)/) {
+            $current_properties_indent = undef;
+            $current_stream = {
+                index => $1,
+            };
+            push @streams, $current_stream;
+        } elsif(/^\s+state:\s*(.*)/) {
+            $current_stream->{'state'} = $1;
+        } elsif(/^\s+client:\s*(\d+)/) {
+            $current_stream->{'client_id'} = $1;
+        } elsif(/^(\s+)properties:/) {
+            $current_properties_indent = length($1);
+        } elsif(defined($current_properties_indent) && /^(\s*)/ && length($1) <= $current_properties_indent) {
+            $current_properties_indent = undef;
+        } elsif(defined($current_properties_indent) && $current_stream && /^\s*(?<key>\S+)\s*=\s*"(?<value>.*)"/) {
+            $current_stream->{$+{'key'}} = $+{'value'};
+        }
+    }
+    close $pipe;
+
+    return @streams;
+}
+
+my @clients = get_clients();
+my @spotify_clients = grep { $_->{'application.name'} eq 'Spotify' } @clients;
+
+my @streams = get_streams();
+my @running_spotify_streams = grep { $_->{'state'} eq 'RUNNING' && $_->{'application.name'} eq 'Spotify' } @streams;
+
+exit unless @running_spotify_streams;
+
+my $min_spotify_stream_index = min(map { $_->{'client_id'} } @running_spotify_streams);
+my @clean_me_up_clients = grep { $_->{'index'} < $min_spotify_stream_index } @spotify_clients;
+
+for my $client (@clean_me_up_clients) {
+    system 'pacmd', 'kill-client', $client->{'index'};
+}
