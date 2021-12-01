@@ -54,6 +54,8 @@ sub set_title($title) {
 
 die "usage: $0 [duration]\n" unless @ARGV;
 
+open STDOUT, '>', '/dev/tty';
+
 my $duration = parse_duration($ARGV[0]);
 
 my $sleep_until = time + $duration;
