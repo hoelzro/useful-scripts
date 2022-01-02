@@ -70,14 +70,24 @@ sub get_streams() {
 my @clients = get_clients();
 my @spotify_clients = grep { $_->{'application.name'} eq 'Spotify' } @clients;
 
+printf "Found %d Spotify clients\n", scalar(@spotify_clients);
+
 my @streams = get_streams();
 my @running_spotify_streams = grep { $_->{'state'} eq 'RUNNING' && $_->{'application.name'} eq 'Spotify' } @streams;
 
-exit unless @running_spotify_streams;
+printf "Found %d running Spotify streams\n", scalar(@running_spotify_streams);
+
+unless(@running_spotify_streams) {
+    say 'No running Spotify streams - doing nothing';
+    exit;
+}
 
 my $min_spotify_stream_index = min(map { $_->{'client_id'} } @running_spotify_streams);
 my @clean_me_up_clients = grep { $_->{'index'} < $min_spotify_stream_index } @spotify_clients;
 
+printf "Found %d Spotify clients older than lowest running one\n", scalar(@clean_me_up_clients);
+
 for my $client (@clean_me_up_clients) {
+    say "Killing client $client->{'index'}";
     system 'pacmd', 'kill-client', $client->{'index'};
 }
