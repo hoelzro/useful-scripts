@@ -1,0 +1,6 @@
+[Unit]
+Description=Kill Spotify clients hanging around
+
+[Service]
+Type=oneshot
+ExecStart=/home/rob/bin/spothole

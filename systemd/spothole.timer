@@ -1,0 +1,8 @@
+[Unit]
+Description=Kill Spotify clients hanging around
+
+[Timer]
+OnCalendar=*:0/5
+
+[Install]
+WantedBy=timers.target
