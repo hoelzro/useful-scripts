@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync dotfiles repo status
+After=network.target
+
+[Service]
+ExecStart=/home/rob/bin/sync-dotfiles
+Type=oneshot
+
+[Install]
+WantedBy=default.target

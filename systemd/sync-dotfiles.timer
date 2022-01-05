@@ -1,0 +1,9 @@
+[Unit]
+Description=Sync dotfiles repo status
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

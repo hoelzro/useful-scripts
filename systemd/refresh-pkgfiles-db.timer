@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh SQLite database of pkgfiles for fast lookups
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

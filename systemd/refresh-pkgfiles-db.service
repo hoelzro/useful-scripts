@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh SQLite database of pkgfiles for fast lookups
+
+[Service]
+ExecStart=/home/rob/bin/refresh-pkgfiles-db
+Type=oneshot
+
+[Install]
+WantedBy=default.target
