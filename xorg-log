@@ -9,7 +9,9 @@ from dateutil import tz
 
 dst_aware_tz = tz.gettz()
 
-with open('/var/log/Xorg.0.log', 'r') as f:
+filename = '/var/log/Xorg.0.log' if len(sys.argv) == 1 else sys.argv[1]
+
+with open(filename, 'r') as f:
     buffered_lines = []
     start_time = None
 
