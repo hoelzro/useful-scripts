@@ -1,15 +1,27 @@
 #!/usr/bin/env python
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import itertools
 import re
+import sys
 
-with open('/proc/stat') as f:
-    for line in f:
-        if m := re.match(r'^btime\s+(\d+)', line):
-            btime = float(m.group(1))
-            break
+from dateutil import tz
+
+dst_aware_tz = tz.gettz()
 
 with open('/var/log/Xorg.0.log', 'r') as f:
+    buffered_lines = []
+    start_time = None
+
     for line in f:
-        line = re.sub(r'^\[(.*?)\]', lambda m: f'[{datetime.fromtimestamp(float(m.group(1))+btime)}]', line)
+        buffered_lines.append(line)
+        if m := re.match(r'^\[(.*?)\].*Log file:.*Time:\s+(.*)', line):
+            start_time = datetime.strptime(m.group(2), '%a %b %d %H:%M:%S %Y')
+            start_time -= timedelta(seconds=float(m.group(1)))
+            abs_tz = timezone(dst_aware_tz.utcoffset(start_time))
+            start_time = start_time.replace(tzinfo=abs_tz)
+            break
+
+    for line in itertools.chain(buffered_lines, f):
+        line = re.sub(r'^\[(.*?)\]', lambda m: f'[{(start_time + timedelta(seconds=float(m.group(1)))).astimezone(dst_aware_tz)}]', line)
         print(line, end='')
