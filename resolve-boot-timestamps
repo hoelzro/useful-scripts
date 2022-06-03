@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+
+from datetime import datetime, timedelta
+import fileinput
+import json
+import re
+import subprocess
+
+BOOT_SECONDS_RE = re.compile(r'^\[\s*(\d+)[.](\d+)\]')
+
+boot_time_offsets = []
+
+# grab suspend times from journald
+suspend_entries = [ json.loads(line) for line in subprocess.check_output(['journalctl', '--boot=0', '--output=json', 'SYSLOG_IDENTIFIER=kernel', 'MESSAGE=PM: suspend exit'], encoding='utf8').splitlines() ]
+assert suspend_entries, 'no suspend entries? suspicious'
+
+for entry in suspend_entries:
+    boot_time_offsets.append( ( int(entry['_SOURCE_MONOTONIC_TIMESTAMP']), datetime.fromtimestamp(int(entry['__REALTIME_TIMESTAMP']) / 1_000_000) ) )
+
+# grab boot time from /proc/stat
+with open('/proc/stat') as f:
+    for line in f:
+        if m := re.match(r'^btime\s+(\d+)', line):
+            btime = datetime.fromtimestamp(int(m.group(1)))
+            break
+boot_time_offsets.append( (0, btime) )
+
+# order by time since boot descending, since we want to search from the latest timestamp going back
+boot_time_offsets.sort(key=lambda pair: pair[0])
+boot_time_offsets.reverse()
+
+def resolve_boot_time_offsets(m):
+    this_entry_timestamp = int(m.group(1) + m.group(2).ljust(6, '0'))
+    # XXX I can probably start the search from the last index I tried
+    for boot_offset, realtime in boot_time_offsets:
+        if boot_offset < this_entry_timestamp:
+            return f'[{realtime + timedelta(seconds=(this_entry_timestamp - boot_offset) / 1_000_000)}]'
+    assert False
+
+input_source = fileinput.input()
+
+for line in input_source:
+    line = line.strip()
+    line = BOOT_SECONDS_RE.sub(resolve_boot_time_offsets, line)
+    print(line)
