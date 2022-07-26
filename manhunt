@@ -1,0 +1,3 @@
+#!/bin/zsh
+
+manpath -q | perl -F: -anle 'my %uniq = map { $_ => 1 } @F; system "find", keys(%uniq), "-name", "*.gz"'  | xargs -d'\n' -n 1000 -P 0 zgrep "$@"
