@@ -7,7 +7,7 @@ else
     if [[ "$(cat /proc/$gppid/comm)" == 'perldoc' ]]; then
         title=perldoc\ $(perl -F'/\0/' -anle 'print($F[-1] =~ s/\x27//gr)' /proc/$gppid/cmdline)
     else
-        title=''
+        title="$(< /proc/$PPID/cmdline perl -F'/\0/' -MFile::Basename=basename -anle 'shift @F if basename($F[0]) eq q{python}; $F[0] = basename($F[0]); print(join(q{ }, @F))')"
     fi
 fi
 title=$(echo "$title" | perl -nle 's/(.)/sprintf("\\x%02x", ord($1))/ger; print')
