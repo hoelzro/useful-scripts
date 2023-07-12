@@ -1,0 +1,22 @@
+#!/bin/bash
+
+vim -S <(cat <<'END_VIML'
+for i in range(0, argc() - 1, 2)
+  let left_file = argv(i)
+  let right_file = argv(i + 1)
+
+  if i != 0
+    tabnew
+    execute 'edit ' . left_file
+  endif
+
+  diffthis
+
+  botright vnew
+  execute 'edit ' . right_file
+  diffthis
+endfor
+
+tabfirst
+END_VIML
+) "$@"
