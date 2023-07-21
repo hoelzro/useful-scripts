@@ -7,6 +7,12 @@ import sys
 
 from dateutil import tz
 
+# xorg-server uses GetTimeInMillis() for timestamp logging, which (depending on compilation options),
+# returns the time since boot in milliseconds as a 32-bit value, which the logger then divides by
+# 1,000 to get the value in seconds.  This means that it rolls every 4.3 million seconds or so - so
+# compensate for that
+MAX_TIMESTAMP_SECONDS = (1 << 32) / 1_000
+
 dst_aware_tz = tz.gettz()
 
 filename = '/var/log/Xorg.0.log' if len(sys.argv) == 1 else sys.argv[1]
@@ -31,10 +37,7 @@ with open(filename, 'r') as f:
         if m := re.match(r'^\[\s*(\d+[.]\d+)\]', line):
             timestamp = float(m.group(1))
             if timestamp < previous_timestamp:
-                # I don't think that using previous_timestamp is 100% accurate here - if, say, 15
-                # minutes elapsed between the two events our offset is probably going to be off by
-                # 15 minutes, but this is the best I can do!
-                timestamp_roll_offset += previous_timestamp
+                timestamp_roll_offset += MAX_TIMESTAMP_SECONDS
             previous_timestamp = timestamp
 
         line = re.sub(r'^\[(.*?)\]', lambda m: f'[{(start_time + timedelta(seconds=timestamp_roll_offset + float(m.group(1)))).astimezone(dst_aware_tz)}]', line)
