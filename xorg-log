@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
-from datetime import datetime, timedelta, timezone
-import itertools
+from datetime import datetime, timedelta
 import re
 import sys
 
@@ -17,23 +16,18 @@ dst_aware_tz = tz.gettz()
 
 filename = '/var/log/Xorg.0.log' if len(sys.argv) == 1 else sys.argv[1]
 
-with open(filename, 'r') as f:
-    buffered_lines = []
+with open('/proc/stat', 'r') as f:
     start_time = None
-
     for line in f:
-        buffered_lines.append(line)
-        if m := re.match(r'^\[(.*?)\].*Log file:.*Time:\s+(.*)', line):
-            start_time = datetime.strptime(m.group(2), '%a %b %d %H:%M:%S %Y')
-            start_time -= timedelta(seconds=float(m.group(1)))
-            abs_tz = timezone(dst_aware_tz.utcoffset(start_time))
-            start_time = start_time.replace(tzinfo=abs_tz)
-            break
+        if m := re.match(r'^btime\s+(\d+)', line):
+            start_time = datetime.fromtimestamp(int(m.group(1)), dst_aware_tz)
+    assert start_time, 'Unable to extract system boot time from /proc/stat'
 
+with open(filename, 'r') as f:
     previous_timestamp = 0
     timestamp_roll_offset = 0
 
-    for line in itertools.chain(buffered_lines, f):
+    for line in f:
         if m := re.match(r'^\[\s*(\d+[.]\d+)\]', line):
             timestamp = float(m.group(1))
             if timestamp < previous_timestamp:
