@@ -24,6 +24,18 @@ with open(filename, 'r') as f:
             start_time = start_time.replace(tzinfo=abs_tz)
             break
 
+    previous_timestamp = 0
+    timestamp_roll_offset = 0
+
     for line in itertools.chain(buffered_lines, f):
-        line = re.sub(r'^\[(.*?)\]', lambda m: f'[{(start_time + timedelta(seconds=float(m.group(1)))).astimezone(dst_aware_tz)}]', line)
+        if m := re.match(r'^\[\s*(\d+[.]\d+)\]', line):
+            timestamp = float(m.group(1))
+            if timestamp < previous_timestamp:
+                # I don't think that using previous_timestamp is 100% accurate here - if, say, 15
+                # minutes elapsed between the two events our offset is probably going to be off by
+                # 15 minutes, but this is the best I can do!
+                timestamp_roll_offset += previous_timestamp
+            previous_timestamp = timestamp
+
+        line = re.sub(r'^\[(.*?)\]', lambda m: f'[{(start_time + timedelta(seconds=timestamp_roll_offset + float(m.group(1)))).astimezone(dst_aware_tz)}]', line)
         print(line, end='')
