@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from datetime import datetime
+import itertools
 import sys
 
 from dateutil.parser import parse as parse_date
@@ -15,49 +16,16 @@ def list_log_groups(logs):
 def dump_logs(logs, log_group, start_time, end_time):
     start_time = int(parse_date(start_time).timestamp() * 1000)
     end_time = int(parse_date(end_time).timestamp() * 1000)
-    streams_to_check = []
-    streams = logs.describe_log_streams(
-        logGroupName=log_group)
 
-    while True:
-        for stream in streams['logStreams']:
-            if 'firstEventTimestamp' not in stream:
-                continue
+    events = itertools.chain.from_iterable(page['events'] for page in logs.get_paginator('filter_log_events').paginate(
+        logGroupName=log_group,
+        startTime=start_time,
+        endTime=end_time))
 
-            if stream['lastEventTimestamp'] < start_time:
-                continue
-            if stream['firstEventTimestamp'] > end_time:
-                continue
-            streams_to_check.append(stream['logStreamName'])
-
-        if 'nextToken' in streams:
-            streams = logs.describe_log_streams(
-                logGroupName=log_group,
-                nextToken=streams['nextToken'])
-        else:
-            break
-
-    for log_stream in streams_to_check:
-
-        events = logs.get_log_events(
-            logGroupName=log_group,
-            logStreamName=log_stream,
-            startTime=start_time,
-            endTime=end_time,
-            startFromHead=True)
-        while events['events']:
-            for event in events['events']:
-                event_date = datetime.fromtimestamp(event['timestamp'] // 1000).strftime('%F %T')
-                event_message = event['message'].strip()
-                print(f'{event_date} {event_message}')
-
-            events = logs.get_log_events(
-                logGroupName=log_group,
-                logStreamName=log_stream,
-                startTime=start_time,
-                endTime=end_time,
-                nextToken=events['nextForwardToken'],
-                startFromHead=True)
+    for event in events:
+        event_date = datetime.fromtimestamp(event['timestamp'] // 1000).strftime('%F %T')
+        event_message = event['message'].strip()
+        print(f'{event_date} {event_message}')
 
 logs = boto3.client('logs')
 
