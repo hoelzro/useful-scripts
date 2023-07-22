@@ -17,6 +17,8 @@ def dump_logs(logs, log_group, start_time, end_time):
     start_time = int(parse_date(start_time).timestamp() * 1000)
     end_time = int(parse_date(end_time).timestamp() * 1000)
 
+    is_first_line = True
+
     events = itertools.chain.from_iterable(page['events'] for page in logs.get_paginator('filter_log_events').paginate(
         logGroupName=log_group,
         startTime=start_time,
@@ -25,6 +27,9 @@ def dump_logs(logs, log_group, start_time, end_time):
     for event in events:
         event_date = datetime.fromtimestamp(event['timestamp'] // 1000).strftime('%F %T')
         event_message = event['message'].strip()
+        if not is_first_line and event_message.startswith('INIT_START '):
+            print('')
+        is_first_line = False
         print(f'{event_date} {event_message}')
 
 logs = boto3.client('logs')
