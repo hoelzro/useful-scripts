@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh pacman files database
+
+[Service]
+ExecStart=/usr/bin/pacman -Fy
+Type=oneshot
+
+[Install]
+WantedBy=multi-user.target
