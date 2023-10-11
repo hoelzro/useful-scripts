@@ -24,7 +24,7 @@ func createHighlightRegexp(tokens []string) (*regexp.Regexp, error) {
 		// XXX if not, what if a "token" defines a capture group?
 	}
 
-	re, err := regexp.Compile(strings.Join(reGroups, "|"))
+	re, err := regexp.Compile("(?i:" + strings.Join(reGroups, "|") + ")")
 	if err != nil {
 		return nil, fmt.Errorf("unable to compile regexp: %w", err)
 	}
