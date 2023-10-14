@@ -20,6 +20,14 @@ unless(@ARGV) {
 my %sessions;
 
 for my $date (@ARGV) {
+    if($date eq 'yesterday') {
+        my ( undef, undef, undef, $day, $month, $year ) = localtime(time - 86_400);
+
+        $month++;
+        $year += 1_900;
+
+        $date = sprintf('%04d-%02d-%02d', $year, $month, $day);
+    }
     my $db_filename = "$ENV{'HOME'}/.zsh_history.d/$date.db";
 
     my $dbh = DBI->connect('dbi:SQLite:dbname=' . $db_filename, undef, undef, {
