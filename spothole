@@ -5,7 +5,7 @@ use warnings;
 use feature qw(say);
 use experimental qw(signatures);
 
-use List::Util qw(min);
+use List::Util qw(max);
 
 sub get_clients() {
     my @clients;
@@ -73,21 +73,26 @@ my @spotify_clients = grep { $_->{'application.name'} eq 'Spotify' } @clients;
 printf "Found %d Spotify clients\n", scalar(@spotify_clients);
 
 my @streams = get_streams();
-my @running_spotify_streams = grep { $_->{'state'} eq 'RUNNING' && $_->{'application.name'} eq 'Spotify' } @streams;
+my @spotify_streams = grep { $_->{'application.name'} eq 'Spotify' } @streams;
 
-printf "Found %d running Spotify streams\n", scalar(@running_spotify_streams);
+printf "Found %d Spotify streams\n", scalar(@spotify_streams);
+my %moribund_clients = map { $_->{'index'} => 1 } @spotify_clients;
 
-unless(@running_spotify_streams) {
-    say 'No running Spotify streams - doing nothing';
-    exit;
+my ( $max_stream ) = reverse(sort { $a->{'index'} <=> $b->{'index'} } @spotify_streams);
+
+{
+    my $max_stream_client_id = $max_stream->{'client_id'};
+    say "Client $max_stream_client_id is reachable via stream $max_stream->{'index'} ($max_stream->{'state'}); skipping";
+    delete $moribund_clients{$max_stream_client_id};
 }
 
-my $min_spotify_stream_index = min(map { $_->{'client_id'} } @running_spotify_streams);
-my @clean_me_up_clients = grep { $_->{'index'} < $min_spotify_stream_index } @spotify_clients;
+{
+    my $max_client_id = max(map { $_->{'index'} => 1 } @spotify_clients);
+    say "Client $max_client_id may not be directly reachable, but may end up getting re-used; skipping";
+    delete $moribund_clients{$max_client_id};
+}
 
-printf "Found %d Spotify clients older than lowest running one\n", scalar(@clean_me_up_clients);
-
-for my $client (@clean_me_up_clients) {
-    say "Killing client $client->{'index'}";
-    system 'pacmd', 'kill-client', $client->{'index'};
+for my $client_id (sort(keys(%moribund_clients))) {
+    say "Killing client $client_id";
+    system 'pacmd', 'kill-client', $client_id;
 }
