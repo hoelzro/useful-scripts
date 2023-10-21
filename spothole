@@ -68,12 +68,12 @@ sub get_streams() {
 }
 
 my @clients = get_clients();
-my @spotify_clients = grep { $_->{'application.name'} eq 'Spotify' } @clients;
+my @spotify_clients = grep { lc($_->{'application.name'}) eq 'spotify' } @clients;
 
 printf "Found %d Spotify clients\n", scalar(@spotify_clients);
 
 my @streams = get_streams();
-my @spotify_streams = grep { $_->{'application.name'} eq 'Spotify' } @streams;
+my @spotify_streams = grep { lc($_->{'application.name'}) eq 'spotify' } @streams;
 
 printf "Found %d Spotify streams\n", scalar(@spotify_streams);
 my %moribund_clients = map { $_->{'index'} => 1 } @spotify_clients;
