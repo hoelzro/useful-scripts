@@ -1,0 +1,13 @@
+#!/usr/bin/env python
+
+import json
+import re
+import sys
+
+LOGFMT_REGEX = re.compile(r'(\w+)=(?:(?:"((?:(?:\\")|[^"])*)")|(\S+))')
+
+def parse_logfmt(line):
+    return { k:(v.replace(r'\"', '"') if v != '' else v2) for k, v, v2 in LOGFMT_REGEX.findall(line) }
+
+for line in sys.stdin:
+    print(json.dumps(parse_logfmt(line)))
