@@ -4,7 +4,7 @@ set -e -u
 
 sync_file=$HOME/.cache/dotfiles-sync
 
-if [[ -e $sync_file ]] ; then
+if [[ -e $sync_file && -s $sync_file ]] ; then
     last_fetch=$(cat $sync_file)
 else
     last_fetch=0
