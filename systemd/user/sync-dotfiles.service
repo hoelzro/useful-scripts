@@ -5,6 +5,10 @@ After=network.target
 [Service]
 ExecStart=/home/rob/bin/sync-dotfiles
 Type=oneshot
+Restart=on-failure
+RestartSec=10s
+RestartMaxDelaySec=5m
+RestartSteps=5
 
 [Install]
 WantedBy=default.target
