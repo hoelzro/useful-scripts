@@ -5,6 +5,24 @@ use warnings;
 use feature qw(say);
 use experimental qw(signatures);
 
+use POSIX qw(mktime);
+
+sub parse_time($s) {
+    if($s =~ /^(\d{1,2}):(\d{1,2})$/) {
+        my $target_hour = $1;
+        my $target_min = $2;
+
+        my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $is_dst ) = localtime;
+
+        # XXX probably won't work with DST =/
+        my $tomorrow_offset = (($target_hour <=> $hour) || ($target_min <=> $min)) <= 0 ? 86_400 : 0;
+
+        return mktime(0, $target_min, $target_hour, $mday, $mon, $year, $wday, $yday, $is_dst) + $tomorrow_offset;
+    }
+
+    return;
+}
+
 sub parse_duration($s) {
     my $orig_s = $s;
 
@@ -56,9 +74,13 @@ die "usage: $0 [duration]\n" unless @ARGV;
 
 open STDOUT, '>', '/dev/tty';
 
-my $duration = parse_duration($ARGV[0]);
+my $sleep_until = parse_time($ARGV[0]);
 
-my $sleep_until = time + $duration;
+unless($sleep_until) {
+    my $duration = parse_duration($ARGV[0]);
+
+    $sleep_until = time + $duration;
+}
 
 # XXX write ~/.cache/tarry/$$ with $sleep_until
 
@@ -68,7 +90,8 @@ my $formatted_until = sprintf('%02d:%02d:%02d', $hour, $min, $sec);
 my $title = "sleeping until $formatted_until";
 set_title($title);
 
-sleep($duration);
+# XXX assert $sleep_until > time()?
+sleep($sleep_until - time);
 # XXX handle ctrl-c
 
 # XXX restore original title (alt. screen?)
