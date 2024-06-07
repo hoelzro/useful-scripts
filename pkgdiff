@@ -1,0 +1,115 @@
+#!/usr/bin/env python
+
+from collections import defaultdict
+import itertools
+import os
+import os.path
+import re
+import subprocess
+import sys
+import tempfile
+
+def usage():
+    print(f'usage: {sys.argv[0]} PACKAGE.src.tar.zst PACKAGE_DIRECTORY/', file=sys.stderr)
+    sys.exit(1)
+
+# The following fields may appear only once in each .SRCINFO file, in the pkgbase section
+SRCINFO_SINGULAR_PKGBASE = {'pkgver', 'pkgrel', 'epoch'}
+
+# The following fields may appear up to once in any section
+SRCINFO_SINGULAR_ANY = {'pkgdesc', 'url', 'install', 'changelog'}
+
+# The following fields may be repeated within a section to specify multiple values
+SRCINFO_MULTIPLE_VALUES = {
+    'arch',
+    'groups',
+    'license',
+    'noextract',
+    'options',
+    'backup',
+    'validpgpkeys', # can only be in pkgbase
+}
+
+# The following fields may, additionally, specify multiple architectures as shown below
+SRCINFO_MULTIARCH = {
+    'source',
+    'depends', 'checkdepends', 'makedepends', 'optdepends',
+    'provides', 'conflicts', 'replaces',
+    'md5sums', 'sha1sums', 'sha224sums', 'sha256sums', 'sha384sums', 'sha512sums',
+}
+
+def parse_srcinfo(f):
+    pkgbase_section = defaultdict(list)
+    package_sections = defaultdict(lambda: defaultdict(list))
+
+    current_section = None
+
+    for line in f:
+        line = line.rstrip()
+        line = re.sub(r'#.*', '', line)
+        line = re.sub(r'\s+$', '', line)
+        if line == '':
+            continue
+
+        m = re.match(r'^\s*(\w+)\s*=\s*(.*)', line)
+        assert m, f'line {line!r} did not match!'
+        key, value = m.groups()
+
+        match key:
+            case 'pkgbase':
+                current_section = pkgbase_section
+            case 'pkgname':
+                assert value not in package_sections
+                package_sections[value] = current_section = {}
+            case _:
+                current_section[key].append(value)
+
+    return { name:dict(pkgbase_section | section) for name, section in package_sections.items() }
+
+def identify_remote_files(pkg_dir):
+    with open(os.path.join(pkg_dir, '.SRCINFO'), 'r') as f:
+        src_info = parse_srcinfo(f)
+    sources = list(itertools.chain.from_iterable(package.get('source', []) for package in src_info.values()))
+
+    for source in sources:
+        if '::' in source:
+            filename, source = source.split('::')
+        else:
+            filename = os.path.basename(source)
+
+        # XXX other protocols
+        if source.startswith('http://') or source.startswith('https://'):
+            yield filename
+
+if len(sys.argv) < 3:
+    usage()
+
+_, older_src_pkg, pkg_dir, *_ = sys.argv
+
+with tempfile.TemporaryDirectory() as tempdir:
+    subprocess.check_call(['tar', 'xf', older_src_pkg, '--zstd', '--strip-components=1', '--directory=' + tempdir])
+
+    old_files = { filename:os.path.join(tempdir, filename) for filename in os.listdir(tempdir) }
+    new_files = { filename:os.path.join(pkg_dir, filename) for filename in os.listdir(pkg_dir) }
+
+    old_remote_files = set(identify_remote_files(tempdir))
+    new_remote_files = set(identify_remote_files(pkg_dir))
+
+    old_files = { filename:path for filename, path in old_files.items() if filename not in old_remote_files }
+    new_files = { filename:path for filename, path in new_files.items() if filename not in new_remote_files }
+
+    compare_me = []
+
+    for filename in set(old_files.keys()) | set(new_files.keys()):
+        if filename in {'.git', '.SRCINFO'}:
+            continue
+
+        old_file_contents = old_files.get(filename, '/dev/null')
+        new_file_contents = new_files.get(filename, '/dev/null')
+
+        # XXX skip if files have identical contents
+        compare_me.append( (old_file_contents, new_file_contents) )
+
+    # XXX use my vimdiff-pairs script (or whatever it's called)
+    for before_path, after_path in compare_me:
+        subprocess.check_call(['vimdiff', before_path, after_path])
