@@ -90,12 +90,18 @@ my $formatted_until = sprintf('%02d:%02d:%02d', $hour, $min, $sec);
 my $title = "sleeping until $formatted_until";
 set_title($title);
 
+my $exit = 0;
+local $SIG{INT} = sub {
+    $exit = 130;
+};
+
 # XXX assert $sleep_until > time()?
 sleep($sleep_until - time);
-# XXX handle ctrl-c
 
 # XXX restore original title (alt. screen?)
 set_title('urxvt');
 print "\a";
+
+exit $exit;
 
 # XXX unlink ~/.cache/tarry/$$
