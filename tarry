@@ -70,6 +70,20 @@ sub set_title($title) {
     }
 }
 
+sub push_title() {
+    do {
+        local $| = 1;
+        print "\e[22;t";
+    };
+}
+
+sub pop_title() {
+    do {
+        local $| = 1;
+        print "\e[23;t";
+    };
+}
+
 die "usage: $0 [duration]\n" unless @ARGV;
 
 open STDOUT, '>', '/dev/tty';
@@ -88,6 +102,7 @@ my ( $sec, $min, $hour ) = localtime($sleep_until);
 my $formatted_until = sprintf('%02d:%02d:%02d', $hour, $min, $sec);
 
 my $title = "sleeping until $formatted_until";
+push_title();
 set_title($title);
 
 my $exit = 0;
@@ -98,8 +113,7 @@ local $SIG{INT} = sub {
 # XXX assert $sleep_until > time()?
 sleep($sleep_until - time);
 
-# XXX restore original title (alt. screen?)
-set_title('urxvt');
+pop_title();
 print "\a";
 
 exit $exit;
