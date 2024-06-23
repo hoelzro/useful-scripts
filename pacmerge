@@ -5,6 +5,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 
 def main(pacnew_file):
@@ -40,16 +41,15 @@ def main(pacnew_file):
         pass
 
     if package_filename is None:
-        curl = subprocess.Popen(['curl', '-Ls', f'https://archive.archlinux.org/packages/{owner[0]}/{owner}/'], stdout=subprocess.PIPE)
-        tidy = subprocess.Popen(['tidy', '--output-xml', 'yes', '--show-warnings', 'no', '--show-info', 'no', '-quiet', '/dev/stdin'], stdin=curl.stdout, stdout=subprocess.PIPE)
-        xmllint = subprocess.Popen(['xmllint', '--xpath', f"string(//a[starts-with(@href,'{owner}-{previous_version}-') and substring(@href, string-length(@href) - 3) != '.sig']/@href)", '/dev/stdin'], stdin=tidy.stdout, stdout=subprocess.PIPE)
+        with tempfile.NamedTemporaryFile(suffix='.xml') as tidy_output:
+            curl = subprocess.Popen(['curl', '-Ls', f'https://archive.archlinux.org/packages/{owner[0]}/{owner}/'], stdout=subprocess.PIPE)
+            tidy = subprocess.Popen(['tidy', '--output-xml', 'yes', '--show-warnings', 'no', '--show-info', 'no', '-quiet', '/dev/stdin'], stdin=curl.stdout, stdout=tidy_output)
 
-        package_filename, _ = xmllint.communicate()
-        package_filename = package_filename.decode().rstrip()
+            curl.wait()
+            tidy.wait()
 
-        curl.wait()
-        tidy.wait()
-        xmllint.wait()
+            package_filename = subprocess.check_output(['xmllint', '--xpath', f"string(//a[starts-with(@href,'{owner}-{previous_version}-') and substring(@href, string-length(@href) - 3) != '.sig']/@href)", tidy_output.name], encoding='utf8')
+            package_filename = package_filename.rstrip()
 
         if package_filename == '':
             raise Exception(f"Could not find {owner} version {previous_version} on archive.archlinux.org - perhaps it's too old?")
