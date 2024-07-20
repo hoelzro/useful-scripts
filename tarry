@@ -105,17 +105,19 @@ my $title = "sleeping until $formatted_until";
 push_title();
 set_title($title);
 
-my $exit = 0;
-local $SIG{INT} = sub {
-    $exit = 130;
+my $we_get_signal = 0;
+do {
+  local $SIG{INT} = sub {
+    $we_get_signal = 1;
+  };
+
+  # XXX assert $sleep_until > time()?
+  sleep($sleep_until - time);
+
+  pop_title();
+  print "\a";
 };
 
-# XXX assert $sleep_until > time()?
-sleep($sleep_until - time);
-
-pop_title();
-print "\a";
-
-exit $exit;
+kill INT => $$ if $we_get_signal;
 
 # XXX unlink ~/.cache/tarry/$$
