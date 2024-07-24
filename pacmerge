@@ -48,7 +48,7 @@ def main(pacnew_file):
             curl.wait()
             tidy.wait()
 
-            package_filename = subprocess.check_output(['xmllint', '--xpath', f"string(//a[starts-with(@href,'{owner}-{previous_version}-') and substring(@href, string-length(@href) - 3) != '.sig']/@href)", tidy_output.name], encoding='utf8')
+            package_filename = subprocess.check_output(['xmllint', '--xpath', f"string(//a[starts-with(@href,'{owner}-{urllib.parse.quote(previous_version)}-') and substring(@href, string-length(@href) - 3) != '.sig']/@href)", tidy_output.name], encoding='utf8')
             package_filename = package_filename.rstrip()
 
         if package_filename == '':
