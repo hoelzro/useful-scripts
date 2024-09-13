@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import itertools
+import json
 import sys
 
 from dateutil.parser import parse as parse_date
@@ -27,6 +28,27 @@ def dump_logs(logs, log_group, start_time, end_time):
     for event in events:
         event_date = datetime.fromtimestamp(event['timestamp'] // 1000).strftime('%F %T')
         event_message = event['message'].strip()
+
+        try:
+            doc = json.loads(event_message)
+            match doc:
+                case {'type': 'platform.initStart', 'record': {'runtimeVersion': runtime_version, 'runtimeVersionArn': runtime_version_arn}}:
+                    event_message = f'INIT_START Runtime Version: {runtime_version} Runtime Version ARN: {runtime_version_arn}'
+                case {'type': 'platform.start', 'record': {'requestId': request_id, 'version': version}}:
+                    event_message = f'START RequestId: {request_id} Version: {version}'
+                case {'type': 'platform.report', 'record': {'requestId': request_id, 'metrics':{'durationMs': duration_ms, 'billedDurationMs': billed_duration_ms, 'memorySizeMB': memory_size_mb, 'maxMemoryUsedMB': max_memory_used_mb}}}:
+                    event_message = f'REPORT RequestId: {request_id} Duration: {duration_ms} ms Billed Duration: {billed_duration_ms} ms Memory Size: {memory_size_mb} MB Max Memory Used: {max_memory_used_mb} MB'
+                    if init_duration_ms := doc['record']['metrics'].get('initDurationMs', None):
+                        event_message += f' Init Duration: {init_duration_ms} ms'
+                case {'type': event_type}:
+                    raise NotImplementedError(f'Unable to handle event type {event_type!r}')
+                case {'message': message}:
+                    event_message = message
+                case _:
+                    raise NotImplementedError('Unable to handle event')
+        except json.JSONDecodeError:
+            pass
+
         if not is_first_line and event_message.startswith('INIT_START '):
             print('')
         is_first_line = False
