@@ -44,6 +44,8 @@ def dump_logs(logs, log_group, start_time, end_time):
                     raise NotImplementedError(f'Unable to handle event type {event_type!r}')
                 case {'message': message}:
                     event_message = message
+                case {'errorType': error_type, 'errorMessage': error_message, 'stackTrace': stack_trace}:
+                    event_message = f'{error_type}: {error_message}\n{'\n'.join(stack_trace)}'
                 case _:
                     raise NotImplementedError('Unable to handle event')
         except json.JSONDecodeError:
