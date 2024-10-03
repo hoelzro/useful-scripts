@@ -1,0 +1,17 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+die "usage: $0 [prefix]\n" unless @ARGV;
+my $prefix = shift @ARGV;
+
+$prefix .= ' ' unless $prefix =~ /\s$/;
+
+while(<>) {
+    chomp;
+
+    say "$prefix$_";
+}
