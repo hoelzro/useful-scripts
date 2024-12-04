@@ -60,10 +60,10 @@ for my $date (@ARGV) {
     }
 }
 
-for my $session_id (sort { $sessions{$a}[0] <=> $sessions{$b}[0] } keys(%sessions)) {
+for my $session_id (sort { $sessions{$a}[0] cmp $sessions{$b}[0] } keys(%sessions)) {
     my $entries = $sessions{$session_id};
     my $max_cwd_length = max(map { length($_->[1]) } @$entries);
-    my $format = "%d\t%-${max_cwd_length}s\t%s\t%s\n";
+    my $format = "%s\t%-${max_cwd_length}s\t%s\t%s\n";
 
     for my $event (@$entries) {
         my ( $timestamp, $cwd, $entry, $status ) = @$event;
