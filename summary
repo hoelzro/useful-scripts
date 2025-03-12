@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+
+import argparse
+from collections import deque
+import fileinput
+
+p = argparse.ArgumentParser()
+p.add_argument('-n', default=10, type=int)
+
+args = p.parse_args()
+
+line_limit = args.n
+
+line_count = 0
+first_lines = []
+last_lines = deque(maxlen=line_limit)
+
+for line in fileinput.input():
+    line = line.rstrip()
+    line_count += 1
+    if len(first_lines) < line_limit:
+        first_lines.append(line)
+    last_lines.append(line)
+
+print(f'{line_count} lines')
+
+print(f'First {line_limit} lines:')
+print('')
+for line in first_lines:
+    print(line)
+print('')
+
+print(f'Last {line_limit} lines:')
+print('')
+for line in last_lines:
+    print(line)
