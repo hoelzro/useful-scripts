@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 if [[ "$(basename $(readlink /proc/$PPID/exe))" == 'man' ]]; then
     title=man\ $(perl -F'/\0/' -anle 'print($F[-1] =~ s/\x27//gr)' /proc/$PPID/cmdline)
@@ -12,4 +12,4 @@ else
 fi
 title=$(echo "$title" | perl -nle 's/(.)/sprintf("\\x%02x", ord($1))/ger; print')
 
-sed -e 's/\x1b\[[^m]*m//g' $1 | col -b | vim -c "set ft=man noswf noma nomod nolist ignorecase title | let &titlestring=\"$title\"" -
+</dev/tty vim -c "set ft=man noswf noma nomod nolist ignorecase title | let &titlestring=\"$title\"" =(sed -e 's/\x1b\[[^m]*m//g' $1 | col -b)
