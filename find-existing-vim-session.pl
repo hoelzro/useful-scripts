@@ -200,7 +200,9 @@ if($tmux) {
     my ( $session, $window, $pane ) = find_tmux_info_by_pane($tmux_pane);
 
     if($ENV{'TMUX'}) {
-        if($goto) {
+        if($ENV{'TMUX'} eq $tmux && $ENV{'TMUX_PANE'} eq $tmux_pane) {
+          say $owner; # pass owner PID up to zsh
+        } elsif($goto) {
             goto_tmux_pane($session, $window, $pane);
         } else {
             bring_tmux_pane_here($session, $window, $pane);
