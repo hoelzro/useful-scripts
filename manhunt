@@ -1,3 +1,18 @@
 #!/bin/zsh
 
-manpath -q | perl -F: -anle 'my %uniq = map { $_ => 1 } @F; system "find", keys(%uniq), "-name", "*.gz"'  | xargs -d'\n' -n 1000 -P 0 zgrep "$@"
+while getopts ":p:" opt; do
+  case $opt in
+    p) package="$OPTARG";;
+    \?) echo "Usage: $0 [-p package] pattern" >&2; exit 1;;
+  esac
+done
+
+targets=${@[*]:$OPTIND}
+
+(
+  if [[ -z "$package" ]] ; then
+    manpath -q | perl -F: -anle 'my %uniq = map { $_ => 1 } @F; system "find", keys(%uniq), "-name", "*.gz"'
+  else
+    pacman -Ql "$package" | perl -anle 'next unless $F[1] =~ m{^/usr/share/man/}; next if m{/$}; print $F[1]'
+  fi
+) | xargs -d'\n' -n 1000 -P 0 zgrep "$targets"
