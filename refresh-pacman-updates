@@ -16,7 +16,7 @@ my ( $out, $out_filename ) = tempfile(DIR => '/var/lib/extra-metrics', UNLINK =>
 say {$out} "# HELP pacman_package_updates Which packages are out-of-date on a system";
 say {$out} "# TYPE pacman_package_updates gauge";
 
-open my $pipe, '-|', 'checkupdates';
+open my $pipe, '-|', 'checkupdates', '--nocolor';
 while(<$pipe>) {
     chomp;
     if(/^(?<package>\S+)\s+(?<version_old>\S+)\s*->\s*(?<version_new>\S+)/) {
