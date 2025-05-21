@@ -31,6 +31,7 @@ my $checkupdates_exit_code = WEXITSTATUS($?);
 close $out;
 
 if($checkupdates_exit_code == 0) {
+    chmod 0444, $out_filename;
     rename $out_filename, '/var/lib/extra-metrics/pacman.prom';
 }
 
