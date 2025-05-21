@@ -9,8 +9,9 @@ use feature qw(say);
 use experimental qw(signatures);
 
 use POSIX qw(WEXITSTATUS);
+use File::Temp qw(tempfile);
 
-open my $out, '|-', 'sponge', '/var/lib/extra-metrics/pacman.prom';
+my ( $out, $out_filename ) = tempfile(DIR => '/var/lib/extra-metrics', UNLINK => 1);
 
 say {$out} "# HELP pacman_package_updates Which packages are out-of-date on a system";
 say {$out} "# TYPE pacman_package_updates gauge";
@@ -28,5 +29,7 @@ while(<$pipe>) {
 close $pipe;
 my $checkupdates_exit_code = WEXITSTATUS($?);
 close $out;
+
+rename $out_filename, '/var/lib/extra-metrics/pacman.prom';
 
 exit $checkupdates_exit_code;
