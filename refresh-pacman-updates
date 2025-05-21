@@ -30,6 +30,8 @@ close $pipe;
 my $checkupdates_exit_code = WEXITSTATUS($?);
 close $out;
 
-rename $out_filename, '/var/lib/extra-metrics/pacman.prom';
+if($checkupdates_exit_code == 0) {
+    rename $out_filename, '/var/lib/extra-metrics/pacman.prom';
+}
 
 exit $checkupdates_exit_code;
