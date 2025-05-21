@@ -1,0 +1,27 @@
+#!/usr/bin/env perl
+
+use autodie;
+no autodie 'close';
+
+use strict;
+use warnings;
+use feature qw(say);
+use experimental qw(signatures);
+
+open my $out, '|-', 'sponge', '/var/lib/extra-metrics/pacman.prom';
+
+say {$out} "# HELP pacman_package_updates Which packages are out-of-date on a system";
+say {$out} "# TYPE pacman_package_updates gauge";
+
+open my $pipe, '-|', 'checkupdates';
+while(<$pipe>) {
+    chomp;
+    if(/^(?<package>\S+)\s+(?<version_old>\S+)\s*->\s*(?<version_new>\S+)/) {
+        my ( $package, $version_old, $version_new ) = @+{qw/package version_old version_new/};
+        say {$out} qq[pacman_package_updates{package="$package", version_old="$version_old", version_new="$version_new"} 1];
+    } else {
+        die "Unable to parse line '$_'";
+    }
+}
+close $pipe;
+close $out;
