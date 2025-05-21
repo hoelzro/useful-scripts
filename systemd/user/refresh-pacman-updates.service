@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh out-of-date pacman packages
+
+[Service]
+ExecStart=/home/rob/bin/refresh-pacman-updates
+Type=oneshot
+
+[Install]
+WantedBy=default.target
