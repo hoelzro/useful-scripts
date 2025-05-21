@@ -8,6 +8,8 @@ use warnings;
 use feature qw(say);
 use experimental qw(signatures);
 
+use POSIX qw(WEXITSTATUS);
+
 open my $out, '|-', 'sponge', '/var/lib/extra-metrics/pacman.prom';
 
 say {$out} "# HELP pacman_package_updates Which packages are out-of-date on a system";
@@ -24,4 +26,7 @@ while(<$pipe>) {
     }
 }
 close $pipe;
+my $checkupdates_exit_code = WEXITSTATUS($?);
 close $out;
+
+exit $checkupdates_exit_code;
