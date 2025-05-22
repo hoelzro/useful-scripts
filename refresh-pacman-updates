@@ -30,6 +30,11 @@ close $pipe;
 my $checkupdates_exit_code = WEXITSTATUS($?);
 close $out;
 
+# checkupdates exits with 2 if there are no updates available
+if($checkupdates_exit_code == 2) {
+    $checkupdates_exit_code = 0;
+}
+
 if($checkupdates_exit_code == 0) {
     chmod 0444, $out_filename;
     rename $out_filename, '/var/lib/extra-metrics/pacman.prom';
