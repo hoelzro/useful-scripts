@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh out-of-date AUR packages
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

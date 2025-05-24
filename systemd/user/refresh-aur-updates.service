@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh out-of-date AUR packages
+
+[Service]
+ExecStart=/home/rob/bin/refresh-aur-updates
+Type=oneshot
+Restart=on-failure
+RestartSec=10s
+RestartMaxDelaySec=5m
+RestartSteps=5
+
+[Install]
+WantedBy=default.target
