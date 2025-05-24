@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+
+from datetime import datetime, timedelta
+import os
+import re
+import subprocess
+import sys
+
+from prometheus_client import CollectorRegistry, Gauge, write_to_textfile
+
+TARGET_FILENAME = '/var/lib/extra-metrics/aur.prom'
+UPDATE_INTERVAL = timedelta(hours=24)
+
+try:
+    s = os.stat(TARGET_FILENAME)
+    target_file_age = datetime.now() - datetime.fromtimestamp(s.st_mtime)
+    if target_file_age < UPDATE_INTERVAL:
+        sys.exit(0)
+except FileNotFoundError:
+    pass
+
+registry = CollectorRegistry()
+aur_package_updates = Gauge('aur_package_updates', 'Which AUR packages are out-of-date on a system', ['package', 'version_old', 'version_new'], registry=registry)
+
+lines = subprocess.check_output(['auracle', 'outdated'], encoding='utf8').rstrip().splitlines()
+for line in lines:
+    package, old_version, new_version = re.match(r'(\S+)\s+(\S+)\s*->\s*(\S+)', line).groups()
+    aur_package_updates.labels(package, old_version, new_version).set(1)
+
+write_to_textfile(TARGET_FILENAME, registry)
