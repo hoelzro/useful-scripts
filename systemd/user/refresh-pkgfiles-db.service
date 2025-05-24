@@ -4,6 +4,10 @@ Description=Refresh SQLite database of pkgfiles for fast lookups
 [Service]
 ExecStart=/home/rob/bin/refresh-pkgfiles-db
 Type=oneshot
+Restart=on-failure
+RestartSec=10s
+RestartMaxDelaySec=5m
+RestartSteps=5
 
 [Install]
 WantedBy=default.target

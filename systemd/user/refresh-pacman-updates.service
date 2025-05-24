@@ -4,6 +4,10 @@ Description=Refresh out-of-date pacman packages
 [Service]
 ExecStart=/home/rob/bin/refresh-pacman-updates
 Type=oneshot
+Restart=on-failure
+RestartSec=10s
+RestartMaxDelaySec=5m
+RestartSteps=5
 
 [Install]
 WantedBy=default.target
