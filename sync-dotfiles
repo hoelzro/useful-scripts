@@ -15,7 +15,7 @@ time_since_last_fetch=$(( $(date +'%s') - $last_fetch ))
 touch $sync_file
 
 if [[ $time_since_last_fetch -gt 86400 ]] ; then
-    for dir in ~/.vim ~/.config/awesome ~/.zsh-scripts/ ~/projects/dotfiles ; do
+    git config --get-all syncdotfiles.repo | while read dir ; do
       git -C $dir fetch
     done
 
