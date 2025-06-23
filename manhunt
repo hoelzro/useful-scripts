@@ -15,4 +15,4 @@ targets=${@[*]:$OPTIND}
   else
     pacman -Ql "$package" | perl -anle 'next unless $F[1] =~ m{^/usr/share/man/}; next if m{/$}; print $F[1]'
   fi
-) | xargs -d'\n' -n 1000 -P 0 zgrep "$targets"
+) | xargs -d'\n' -n 1000 -P 0 zgrep --color=auto "$targets"
