@@ -83,11 +83,19 @@ def identify_remote_files(pkg_dir):
 def gather_files(pkg_dir, name_blocklist):
     files = set()
 
+    git_subdir = pathlib.Path(pkg_dir) / '.git'
+
     for child in pathlib.Path(pkg_dir).glob('**/*'):
         if child.is_dir():
             continue
 
         if child.name in name_blocklist:
+            continue
+
+        if child.name == '.SRCINFO':
+            continue
+
+        if child.is_relative_to(git_subdir):
             continue
 
         files.add(child.relative_to(pkg_dir))
@@ -111,9 +119,6 @@ with tempfile.TemporaryDirectory() as tempdir:
     compare_me = []
 
     for rel_path in old_files | new_files:
-        if rel_path.name in {'.git', '.SRCINFO'} or str(rel_path).startswith('.git/'):
-            continue
-
         old_file_contents = tempdir / rel_path if rel_path in old_files else pathlib.Path('/dev/null')
         new_file_contents = pkg_dir / rel_path if rel_path in new_files else pathlib.Path('/dev/null')
 
