@@ -60,7 +60,7 @@ def parse_srcinfo(f):
                 current_section = pkgbase_section
             case 'pkgname':
                 assert value not in package_sections
-                package_sections[value] = current_section = {}
+                package_sections[value] = current_section = defaultdict(list)
             case _:
                 current_section[key].append(value)
 
