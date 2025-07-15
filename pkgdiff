@@ -88,23 +88,23 @@ _, older_src_pkg, pkg_dir, *_ = sys.argv
 with tempfile.TemporaryDirectory() as tempdir:
     subprocess.check_call(['tar', 'xf', older_src_pkg, '--zstd', '--strip-components=1', '--directory=' + tempdir])
 
-    old_files = { child.name:pathlib.Path(tempdir, child) for child in pathlib.Path(tempdir).iterdir() }
-    new_files = { child.name:pathlib.Path(pkg_dir, child) for child in pathlib.Path(pkg_dir).iterdir() }
+    old_files = { child.relative_to(tempdir):pathlib.Path(tempdir, child) for child in pathlib.Path(tempdir).glob('**/*') if not child.is_dir() }
+    new_files = { child.relative_to(pkg_dir):pathlib.Path(pkg_dir, child) for child in pathlib.Path(pkg_dir).glob('**/*') if not child.is_dir() }
 
     old_remote_files = set(identify_remote_files(tempdir))
     new_remote_files = set(identify_remote_files(pkg_dir))
 
-    old_files = { filename:path for filename, path in old_files.items() if filename not in old_remote_files }
-    new_files = { filename:path for filename, path in new_files.items() if filename not in new_remote_files }
+    old_files = { rel_path:path for rel_path, path in old_files.items() if rel_path.name not in old_remote_files }
+    new_files = { rel_path:path for rel_path, path in new_files.items() if rel_path.name not in new_remote_files }
 
     compare_me = []
 
-    for filename in set(old_files.keys()) | set(new_files.keys()):
-        if filename in {'.git', '.SRCINFO'}:
+    for rel_path in set(old_files.keys()) | set(new_files.keys()):
+        if rel_path.name in {'.git', '.SRCINFO'} or str(rel_path).startswith('.git/'):
             continue
 
-        old_file_contents = old_files.get(filename, pathlib.Path('/dev/null'))
-        new_file_contents = new_files.get(filename, pathlib.Path('/dev/null'))
+        old_file_contents = old_files.get(rel_path, pathlib.Path('/dev/null'))
+        new_file_contents = new_files.get(rel_path, pathlib.Path('/dev/null'))
 
         # XXX skip if files have identical contents
         compare_me.append( (old_file_contents, new_file_contents) )
