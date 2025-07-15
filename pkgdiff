@@ -81,13 +81,13 @@ def identify_remote_files(pkg_dir):
             yield filename
 
 def gather_files(pkg_dir):
-    files = {}
+    files = set()
 
     for child in pathlib.Path(pkg_dir).glob('**/*'):
         if child.is_dir():
             continue
 
-        files[child.relative_to(pkg_dir)] = child
+        files.add(child.relative_to(pkg_dir))
 
     return files
 
@@ -105,17 +105,17 @@ with tempfile.TemporaryDirectory() as tempdir:
     old_remote_files = set(identify_remote_files(tempdir))
     new_remote_files = set(identify_remote_files(pkg_dir))
 
-    old_files = { rel_path:path for rel_path, path in old_files.items() if rel_path.name not in old_remote_files }
-    new_files = { rel_path:path for rel_path, path in new_files.items() if rel_path.name not in new_remote_files }
+    old_files = { path for path in old_files if path.name not in old_remote_files }
+    new_files = { path for path in new_files if path.name not in new_remote_files }
 
     compare_me = []
 
-    for rel_path in set(old_files.keys()) | set(new_files.keys()):
+    for rel_path in old_files | new_files:
         if rel_path.name in {'.git', '.SRCINFO'} or str(rel_path).startswith('.git/'):
             continue
 
-        old_file_contents = old_files.get(rel_path, pathlib.Path('/dev/null'))
-        new_file_contents = new_files.get(rel_path, pathlib.Path('/dev/null'))
+        old_file_contents = tempdir / rel_path if rel_path in old_files else pathlib.Path('/dev/null')
+        new_file_contents = pkg_dir / rel_path if rel_path in new_files else pathlib.Path('/dev/null')
 
         if old_file_contents.read_bytes() == new_file_contents.read_bytes():
             continue
