@@ -109,8 +109,6 @@ with tempfile.TemporaryDirectory() as tempdir:
         if old_file_contents.read_bytes() == new_file_contents.read_bytes():
             continue
 
-        compare_me.append( (old_file_contents, new_file_contents) )
+        compare_me.extend( (old_file_contents, new_file_contents) )
 
-    # XXX use my vimdiff-pairs script (or whatever it's called)
-    for before_path, after_path in compare_me:
-        subprocess.check_call(['vimdiff', before_path, after_path])
+    subprocess.check_call(['vimdiff-pairs'] + compare_me)
