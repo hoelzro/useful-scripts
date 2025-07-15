@@ -119,12 +119,15 @@ with tempfile.TemporaryDirectory() as tempdir:
     compare_me = []
 
     for rel_path in old_files | new_files:
-        old_file_contents = tempdir / rel_path if rel_path in old_files else pathlib.Path('/dev/null')
-        new_file_contents = pkg_dir / rel_path if rel_path in new_files else pathlib.Path('/dev/null')
+        old_path = tempdir / rel_path
+        new_path = pkg_dir / rel_path
 
-        if old_file_contents.read_bytes() == new_file_contents.read_bytes():
-            continue
-
-        compare_me.extend( (old_file_contents, new_file_contents) )
+        if rel_path in old_files and rel_path in new_files:
+            if old_path.read_bytes() != new_path.read_bytes():
+                compare_me.extend( (old_path, new_path) )
+        elif rel_path in old_files:
+            compare_me.extend( (old_path, pathlib.Path('/dev/null')) )
+        else: # rel_path in new_files
+            compare_me.extend( (pathlib.Path('/dev/null'), new_path) )
 
     subprocess.check_call(['vimdiff-pairs'] + compare_me)
