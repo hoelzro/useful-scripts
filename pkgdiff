@@ -2,8 +2,7 @@
 
 from collections import defaultdict
 import itertools
-import os
-import os.path
+import pathlib
 import re
 import subprocess
 import sys
@@ -67,7 +66,7 @@ def parse_srcinfo(f):
     return { name:dict(pkgbase_section | section) for name, section in package_sections.items() }
 
 def identify_remote_files(pkg_dir):
-    with open(os.path.join(pkg_dir, '.SRCINFO'), 'r') as f:
+    with pathlib.Path(pkg_dir, '.SRCINFO').open() as f:
         src_info = parse_srcinfo(f)
     sources = list(itertools.chain.from_iterable(package.get('source', []) for package in src_info.values()))
 
@@ -75,7 +74,7 @@ def identify_remote_files(pkg_dir):
         if '::' in source:
             filename, source = source.split('::')
         else:
-            filename = os.path.basename(source)
+            filename = pathlib.Path(source).name
 
         # XXX other protocols
         if source.startswith('http://') or source.startswith('https://'):
@@ -89,8 +88,8 @@ _, older_src_pkg, pkg_dir, *_ = sys.argv
 with tempfile.TemporaryDirectory() as tempdir:
     subprocess.check_call(['tar', 'xf', older_src_pkg, '--zstd', '--strip-components=1', '--directory=' + tempdir])
 
-    old_files = { filename:os.path.join(tempdir, filename) for filename in os.listdir(tempdir) }
-    new_files = { filename:os.path.join(pkg_dir, filename) for filename in os.listdir(pkg_dir) }
+    old_files = { child.name:pathlib.Path(tempdir, child) for child in pathlib.Path(tempdir).iterdir() }
+    new_files = { child.name:pathlib.Path(pkg_dir, child) for child in pathlib.Path(pkg_dir).iterdir() }
 
     old_remote_files = set(identify_remote_files(tempdir))
     new_remote_files = set(identify_remote_files(pkg_dir))
@@ -104,8 +103,8 @@ with tempfile.TemporaryDirectory() as tempdir:
         if filename in {'.git', '.SRCINFO'}:
             continue
 
-        old_file_contents = old_files.get(filename, '/dev/null')
-        new_file_contents = new_files.get(filename, '/dev/null')
+        old_file_contents = old_files.get(filename, pathlib.Path('/dev/null'))
+        new_file_contents = new_files.get(filename, pathlib.Path('/dev/null'))
 
         # XXX skip if files have identical contents
         compare_me.append( (old_file_contents, new_file_contents) )
