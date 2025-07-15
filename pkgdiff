@@ -80,11 +80,14 @@ def identify_remote_files(pkg_dir):
         if source.startswith('http://') or source.startswith('https://'):
             yield filename
 
-def gather_files(pkg_dir):
+def gather_files(pkg_dir, name_blocklist):
     files = set()
 
     for child in pathlib.Path(pkg_dir).glob('**/*'):
         if child.is_dir():
+            continue
+
+        if child.name in name_blocklist:
             continue
 
         files.add(child.relative_to(pkg_dir))
@@ -99,14 +102,11 @@ _, older_src_pkg, pkg_dir, *_ = sys.argv
 with tempfile.TemporaryDirectory() as tempdir:
     subprocess.check_call(['tar', 'xf', older_src_pkg, '--zstd', '--strip-components=1', '--directory=' + tempdir])
 
-    old_files = gather_files(tempdir)
-    new_files = gather_files(pkg_dir)
-
     old_remote_files = set(identify_remote_files(tempdir))
     new_remote_files = set(identify_remote_files(pkg_dir))
 
-    old_files = { path for path in old_files if path.name not in old_remote_files }
-    new_files = { path for path in new_files if path.name not in new_remote_files }
+    old_files = gather_files(tempdir, old_remote_files)
+    new_files = gather_files(pkg_dir, new_remote_files)
 
     compare_me = []
 
