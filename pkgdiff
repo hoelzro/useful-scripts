@@ -106,7 +106,9 @@ with tempfile.TemporaryDirectory() as tempdir:
         old_file_contents = old_files.get(rel_path, pathlib.Path('/dev/null'))
         new_file_contents = new_files.get(rel_path, pathlib.Path('/dev/null'))
 
-        # XXX skip if files have identical contents
+        if old_file_contents.read_bytes() == new_file_contents.read_bytes():
+            continue
+
         compare_me.append( (old_file_contents, new_file_contents) )
 
     # XXX use my vimdiff-pairs script (or whatever it's called)
