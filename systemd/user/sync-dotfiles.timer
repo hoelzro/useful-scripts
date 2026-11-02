@@ -2,7 +2,8 @@
 Description=Sync dotfiles repo status
 
 [Timer]
-OnCalendar=hourly
+OnBootSec=5m
+OnBootActiveSec=1h
 Persistent=true
 
 [Install]

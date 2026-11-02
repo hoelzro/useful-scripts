@@ -2,7 +2,8 @@
 Description=Refresh out-of-date AUR packages
 
 [Timer]
-OnCalendar=hourly
+OnBootSec=5m
+OnBootActiveSec=1h
 Persistent=true
 
 [Install]
