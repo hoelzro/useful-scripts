@@ -2,8 +2,7 @@
 Description=Refresh SQLite database of pkgfiles for fast lookups
 
 [Timer]
-OnBootSec=5m
-OnBootActiveSec=1h
+OnCalendar=*-*-* *:00:00
 Persistent=true
 
 [Install]
